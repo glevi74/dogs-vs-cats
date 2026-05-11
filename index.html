@@ -840,15 +840,19 @@ function update() {
 
   dogBaseHP=Math.max(0,dogBaseHP); catBaseHP=Math.max(0,catBaseHP);
   // Mindkét fél detektál lokálisan — a showGameOver()-ben van a host-only publish guard
-  if      (catBaseHP<=0) { gameOver=true; showGameOver('dog'); }
-  else if (dogBaseHP<=0) { gameOver=true; showGameOver('cat'); }
+  if      (catBaseHP<=0) { console.log('[update] catBaseHP=0, gameOver=', gameOver); gameOver=true; showGameOver('dog'); }
+  else if (dogBaseHP<=0) { console.log('[update] dogBaseHP=0, gameOver=', gameOver); gameOver=true; showGameOver('cat'); }
 }
 
 function showGameOver(winner, opponentLeft=false) {
+  console.log('[GameOver] showGameOver hívva — winner:', winner, '| mpRole:', mpRole, '| gameOver már:', gameOver);
   gameOver=true;
   const rt=document.getElementById('result-text');
   const connRow=document.getElementById('mp-conn-row');
-  document.getElementById('overlay').style.display = 'flex'; // inline style, felülírja a hide() által beállított display:none-t
+  const overlayEl = document.getElementById('overlay');
+  console.log('[GameOver] overlay elem:', overlayEl, '| jelenlegi display:', overlayEl ? overlayEl.style.display : 'N/A');
+  if (overlayEl) overlayEl.style.display = 'flex';
+  console.log('[GameOver] overlay.style.display beállítva: flex');
   document.getElementById('ai-thinking').textContent='';
   if (winner==='dog'){rt.textContent='🐕 A kutyák nyertek! 🎉';rt.style.color='#60a5fa';}
   else               {rt.textContent='🐱 A macskák nyertek! 😼';rt.style.color='#f87171';}
@@ -1162,6 +1166,25 @@ document.querySelectorAll('.unit-btn').forEach(btn => {
     e.preventDefault(); setDiff(id.replace('diff-',''));
   },{passive:false});
 });
+
+// ── Game-over biztonsági háló (setInterval) ───────────────────────────────────
+// Ha a normál detektálás valamiért nem fut le, ez 500ms-enként pótolja
+setInterval(() => {
+  if (!gameStarted) return;
+  const overlayEl = document.getElementById('overlay');
+  if (gameOver) {
+    // gameOver=true de overlay rejtett maradt? Kényszerítjük
+    if (overlayEl && overlayEl.style.display !== 'flex') {
+      console.log('[Safety] gameOver=true de overlay rejtett! Kényszermegjelenítés...');
+      const w = catBaseHP <= 0 ? 'dog' : 'cat';
+      showGameOver(w);
+    }
+    return;
+  }
+  // HP=0 de nem detektálódott?
+  if      (catBaseHP <= 0) { console.log('[Safety] catBaseHP=0, kényszer game over'); gameOver=true; showGameOver('dog'); }
+  else if (dogBaseHP <= 0) { console.log('[Safety] dogBaseHP=0, kényszer game over'); gameOver=true; showGameOver('cat'); }
+}, 500);
 
 // ── Indítás ───────────────────────────────────────────────────────────────────
 updateGoldUI();
