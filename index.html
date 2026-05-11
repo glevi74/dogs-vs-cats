@@ -1114,10 +1114,13 @@ function drawHUD() {
 
 function drawParticles() {
   for (const p of particles) {
-    ctx.globalAlpha=p.life; ctx.fillStyle=p.color;
-    ctx.beginPath(); ctx.arc(p.x,p.y,p.r*p.life,0,Math.PI*2); ctx.fill();
+    const r = p.r * p.life;
+    if (r <= 0) continue;          // negatív/nulla sugár → kihagyjuk (ne dobjon hibát)
+    ctx.globalAlpha = Math.max(0, Math.min(1, p.life));
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2); ctx.fill();
   }
-  ctx.globalAlpha=1;
+  ctx.globalAlpha = 1;             // mindenképp visszaállítjuk
 }
 
 // ── Game loop ─────────────────────────────────────────────────────────────────
