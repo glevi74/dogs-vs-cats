@@ -625,7 +625,7 @@ function mpHandleMessage(msg) {
     // A guest megkapja a host döntését — UI megjelenítés, újraküldés nélkül
     if (!gameOver) {
       gameOver = true;
-      document.getElementById('overlay').classList.add('visible');
+      document.getElementById('overlay').style.display = 'flex';
       document.getElementById('ai-thinking').textContent = '';
       document.getElementById('mp-conn-row').style.display = 'none';
       const rt = document.getElementById('result-text');
@@ -773,7 +773,7 @@ function resetGame() {
   mpGameTick=0; mpSyncTimer=0;
   aiTimer=0; aiNextThink=calcNextThink(); aiThinkingDots=0; aiDotTimer=0;
   document.getElementById('ai-thinking').textContent='';
-  document.getElementById('overlay').classList.remove('visible');
+  document.getElementById('overlay').style.display = 'none';
   updateGoldUI();
 }
 
@@ -848,7 +848,7 @@ function showGameOver(winner, opponentLeft=false) {
   gameOver=true;
   const rt=document.getElementById('result-text');
   const connRow=document.getElementById('mp-conn-row');
-  document.getElementById('overlay').classList.add('visible');
+  document.getElementById('overlay').style.display = 'flex'; // inline style, felülírja a hide() által beállított display:none-t
   document.getElementById('ai-thinking').textContent='';
   if (winner==='dog'){rt.textContent='🐕 A kutyák nyertek! 🎉';rt.style.color='#60a5fa';}
   else               {rt.textContent='🐱 A macskák nyertek! 😼';rt.style.color='#f87171';}
