@@ -424,15 +424,19 @@ function startLocal() {
 function mpInitAbly() {
   if (ablyClient) return;
   if (ABLY_KEY === 'YOUR_ABLY_KEY_HERE') {
-    showLobbyError('⚠ Nincs Ably API key beállítva!'); return;
+    showLobbyError('⚠ Nincs Ably API key!'); return;
   }
   if (typeof Ably === 'undefined') {
-    showLobbyError('⚠ Ably SDK nem töltődött be. Ellenőrizd az internetkapcsolatot!'); return;
+    showLobbyError('⚠ Ably SDK nem töltődött be. Nincs internet?'); return;
   }
   try {
     ablyClient = new Ably.Realtime({
       key: ABLY_KEY,
       clientId: 'p-' + Math.random().toString(36).substr(2, 8)
+    });
+    ablyClient.connection.on('failed', () => {
+      showLobbyError('❌ Kapcsolat sikertelen — ellenőrizd az API key-t!');
+      ablyClient = null;
     });
   } catch(e) {
     showLobbyError('Ably hiba: ' + e.message);
@@ -444,39 +448,46 @@ function generateRoomCode() {
   return Array.from({length:6}, () => chars[Math.floor(Math.random()*chars.length)]).join('');
 }
 
-// Ably v2 — Promise alapú API
-async function mpCreateRoom() {
+function mpCreateRoom() {
   if (!ablyClient) { mpInitAbly(); if (!ablyClient) return; }
+
   mpRoomCode = generateRoomCode();
   mpRole     = 'host';
   mpMyPlayer = 1;
   mpChannel  = ablyClient.channels.get('room-' + mpRoomCode);
 
-  // Üzenet figyelő
-  await mpChannel.subscribe('game-event', mpHandleMessage);
+  // Azonnali visszajelzés
+  const btn = document.querySelector('.btn-create');
+  if (btn) btn.textContent = '⏳ Csatlakozás...';
+
+  // Üzenet figyelő (fire-and-forget)
+  mpChannel.subscribe('game-event', mpHandleMessage);
 
   // Ellenfél megjelenés figyelése
-  await mpChannel.presence.subscribe('enter', member => {
+  mpChannel.presence.subscribe('enter', member => {
     if (member.data && member.data.role === 'guest') {
       mpConnected = true;
       mpStartOnlineGame();
     }
   });
-  await mpChannel.presence.subscribe('leave', member => {
+  mpChannel.presence.subscribe('leave', member => {
     if (mpMode && gameStarted && member.data && member.data.role === 'guest') mpOpponentLeft();
   });
 
-  // Belépés a szobába
-  try {
-    await mpChannel.presence.enter({ role: 'host' });
-    document.getElementById('room-code-text').textContent = mpRoomCode;
-    showLobbySection('lobby-waiting');
-  } catch(e) {
-    showLobbyError('Szoba létrehozása sikertelen: ' + e.message);
-  }
+  // Belépés a szobába — itt várjuk a visszajelzést
+  mpChannel.presence.enter({ role: 'host' })
+    .then(() => {
+      document.getElementById('room-code-text').textContent = mpRoomCode;
+      if (btn) btn.textContent = '➕ Szoba létrehozása';
+      showLobbySection('lobby-waiting');
+    })
+    .catch(e => {
+      if (btn) btn.textContent = '➕ Szoba létrehozása';
+      showLobbyError('Szoba hiba: ' + (e.message || String(e)));
+    });
 }
 
-async function mpJoinRoom() {
+function mpJoinRoom() {
   const code = document.getElementById('join-code').value.trim().toUpperCase();
   if (code.length !== 6) { showLobbyError('6 karakteres kód szükséges!'); return; }
   if (!ablyClient) { mpInitAbly(); if (!ablyClient) return; }
@@ -488,28 +499,30 @@ async function mpJoinRoom() {
 
   showLobbySection('lobby-connecting');
 
-  try {
-    // Ellenőrzés: van-e host a szobában?
-    const members = await mpChannel.presence.get();
-    const host = members.find(m => m.data && m.data.role === 'host');
-    if (!host) {
+  // Ellenőrzés: van-e host?
+  mpChannel.presence.get()
+    .then(members => {
+      const host = members.find(m => m.data && m.data.role === 'host');
+      if (!host) {
+        showLobbySection('lobby-main');
+        showLobbyError('Szoba nem található: ' + code);
+        return;
+      }
+      mpChannel.subscribe('game-event', mpHandleMessage);
+      mpChannel.presence.subscribe('leave', member => {
+        if (mpMode && gameStarted && member.data && member.data.role === 'host') mpOpponentLeft();
+      });
+      return mpChannel.presence.enter({ role: 'guest' });
+    })
+    .then(v => {
+      if (v === undefined) return; // 'room not found' ág
+      mpConnected = true;
+      mpStartOnlineGame();
+    })
+    .catch(e => {
       showLobbySection('lobby-main');
-      showLobbyError('Szoba nem található: ' + code);
-      return;
-    }
-
-    await mpChannel.subscribe('game-event', mpHandleMessage);
-    await mpChannel.presence.subscribe('leave', member => {
-      if (mpMode && gameStarted && member.data && member.data.role === 'host') mpOpponentLeft();
+      showLobbyError('Csatlakozás sikertelen: ' + (e.message || String(e)));
     });
-    await mpChannel.presence.enter({ role: 'guest' });
-
-    mpConnected = true;
-    mpStartOnlineGame();
-  } catch(e) {
-    showLobbySection('lobby-main');
-    showLobbyError('Csatlakozás sikertelen: ' + e.message);
-  }
 }
 
 function mpStartOnlineGame() {
