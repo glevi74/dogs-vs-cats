@@ -591,7 +591,14 @@ function mpHandleMessage(msg) {
     if (d.player === 1) gold1 = Math.max(0, gold1 - cost);
     else                gold2 = Math.max(0, gold2 - cost);
     updateGoldUI();
-    units.push(createUnit(d.unitType, d.lane));
+    const unit = createUnit(d.unitType, d.lane);
+    // Hálózati késés kompenzálása: a unit-ot előreugrasztjuk
+    if (d.tick !== undefined && mpGameTick > d.tick) {
+      const td = mpGameTick - d.tick;
+      unit.x += unit.spd * td;
+      unit.animPhase += Math.abs(unit.spd) * 0.22 * td;
+    }
+    units.push(unit);
   }
 
   else if (d.type === 'SYNC') {
@@ -600,6 +607,11 @@ function mpHandleMessage(msg) {
     // HP-t mindig felülírjuk — küszöb nélkül, hogy 0-ra szinkronizáljon game over előtt
     dogBaseHP = d.dogHP;
     catBaseHP = d.catHP;
+    // Ha a host 0 HP-t küld, azonnal game over — nem várunk a következő update()-re
+    if (!gameOver) {
+      if      (catBaseHP <= 0) { gameOver = true; showGameOver('dog'); }
+      else if (dogBaseHP <= 0) { gameOver = true; showGameOver('cat'); }
+    }
     if (Math.abs(gold1 - d.g1) > 8) { gold1 = d.g1; updateGoldUI(); }
     if (Math.abs(gold2 - d.g2) > 8) { gold2 = d.g2; updateGoldUI(); }
   }
