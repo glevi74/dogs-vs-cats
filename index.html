@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Kutyák vs Macskák</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body {
+    width:100%; height:100%; overflow:hidden;
+    background:#000; display:flex;
+    align-items:center; justify-content:center;
+  }
+  #wrapper {
+    position:absolute;
+    width:800px;
+    transform-origin:top left;
+    font-family:'Segoe UI',sans-serif;
+    color:#fff; user-select:none;
+  }
+  #game-container {
+    position:relative;
+    border:3px solid #a855f7;
+    border-radius:10px;
+    overflow:hidden;
+  }
+  canvas { display:block; }
+  #ui {
+    display:flex; gap:8px;
+    margin-top:7px;
+  }
+  .player-panel {
+    flex:1; background:#1e0d40;
+    border-radius:10px; padding:8px;
+    display:flex; flex-direction:column; gap:7px;
+  }
+  .player-panel.p1 { border:2px solid #60a5fa; }
+  .player-panel.p2 { border:2px solid #f87171; }
+  .panel-header {
+    display:flex; align-items:center;
+    justify-content:space-between;
+    font-weight:bold; font-size:.9rem;
+  }
+  .p1 .panel-header { color:#93c5fd; }
+  .p2 .panel-header { color:#fca5a5; }
+  .gold-display { font-size:.95rem; color:#fbbf24; font-weight:bold; }
+  .unit-row { display:flex; gap:5px; }
+  .unit-btn {
+    flex:1; display:flex; flex-direction:column;
+    align-items:center; gap:2px;
+    background:#2d1b69; border-radius:8px;
+    padding:8px 3px; cursor:pointer;
+    border:2px solid transparent;
+    /* Larger touch target */
+    min-height:72px; justify-content:center;
+    transition:filter .1s;
+    -webkit-user-select:none;
+  }
+  .unit-btn:active { filter:brightness(1.4); transform:scale(.96); }
+  .p1 .unit-btn { border-color:#3b4f8a; }
+  .p2 .unit-btn { border-color:#7a3f3f; }
+  .unit-btn .uname { font-size:.65rem; color:#c4b5fd; white-space:nowrap; }
+  .unit-btn .ucost { font-size:.72rem; color:#fbbf24; font-weight:bold; }
+  .unit-btn .ico   { font-size:1.5rem; line-height:1.1; }
+  #overlay {
+    display:none; position:absolute; inset:0;
+    background:#000c; align-items:center;
+    justify-content:center; flex-direction:column; gap:18px;
+    font-size:2rem; font-weight:bold;
+  }
+  #overlay.visible { display:flex; }
+  .result { text-shadow:0 0 30px currentColor; }
+  #restart-btn {
+    font-size:1.1rem; padding:14px 36px;
+    background:#a855f7; border:none;
+    border-radius:10px; color:#fff;
+    cursor:pointer; font-weight:bold;
+    min-width:200px;
+  }
+</style>
+</head>
+<body>
+<div id="wrapper">
+  <div id="game-container">
+    <canvas id="canvas" width="800" height="390"></canvas>
+    <div id="overlay">
+      <div class="result" id="result-text"></div>
+      <button id="restart-btn">Újra játék</button>
+    </div>
+  </div>
+  <div id="ui">
+    <!-- Player 1: Dogs -->
+    <div class="player-panel p1">
+      <div class="panel-header">
+        <span>🐕 1. Játékos</span>
+        <span class="gold-display">🪙<span id="gold1">50</span></span>
+      </div>
+      <div class="unit-row">
+        <div class="unit-btn" ontouchstart="spawnUnit('pup',1)" onclick="spawnUnit('pup',1)">
+          <span class="ico">🐾</span><span class="uname">Kölyök</span><span class="ucost">🪙20</span>
+        </div>
+        <div class="unit-btn" ontouchstart="spawnUnit('lab',1)" onclick="spawnUnit('lab',1)">
+          <span class="ico">🐾</span><span class="uname">Labrador</span><span class="ucost">🪙40</span>
+        </div>
+        <div class="unit-btn" ontouchstart="spawnUnit('wolf',1)" onclick="spawnUnit('wolf',1)">
+          <span class="ico">🐾</span><span class="uname">Farkas</span><span class="ucost">🪙70</span>
+        </div>
+        <div class="unit-btn" ontouchstart="spawnUnit('bear',1)" onclick="spawnUnit('bear',1)">
+          <span class="ico">🐾</span><span class="uname">Medve</span><span class="ucost">🪙120</span>
+        </div>
+      </div>
+    </div>
+    <!-- Player 2: Cats -->
+    <div class="player-panel p2">
+      <div class="panel-header">
+        <span>🐱 2. Játékos</span>
+        <span class="gold-display">🪙<span id="gold2">50</span></span>
+      </div>
+      <div class="unit-row">
+        <div class="unit-btn" ontouchstart="spawnUnit('kit',2)" onclick="spawnUnit('kit',2)">
+          <span class="ico">🐾</span><span class="uname">Kölyök</span><span class="ucost">🪙20</span>
+        </div>
+        <div class="unit-btn" ontouchstart="spawnUnit('tom',2)" onclick="spawnUnit('tom',2)">
+          <span class="ico">🐾</span><span class="uname">Kandúr</span><span class="ucost">🪙40</span>
+        </div>
+        <div class="unit-btn" ontouchstart="spawnUnit('lion',2)" onclick="spawnUnit('lion',2)">
+          <span class="ico">🐾</span><span class="uname">Oroszlán</span><span class="ucost">🪙70</span>
+        </div>
+        <div class="unit-btn" ontouchstart="spawnUnit('tiger',2)" onclick="spawnUnit('tiger',2)">
+          <span class="ico">🐾</span><span class="uname">Tigris</span><span class="ucost">🪙120</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Responsive scaling ────────────────────────────────────────────────────────
+const GAME_W = 800, GAME_H = 490; // canvas(390) + ui(~100)
+function scaleGame() {
+  const s = Math.min(window.innerWidth / GAME_W, window.innerHeight / GAME_H);
+  const wrapper = document.getElementById('wrapper');
+  wrapper.style.transform = `scale(${s})`;
+  const dx = (window.innerWidth  - GAME_W * s) / 2;
+  const dy = (window.innerHeight - GAME_H * s) / 2;
+  wrapper.style.left = dx + 'px';
+  wrapper.style.top  = dy + 'px';
+}
+window.addEventListener('resize', scaleGame);
+scaleGame();
+
+// ── Canvas setup ──────────────────────────────────────────────────────────────
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+
+const LANES = [82, 158, 234, 310];
+const DOG_BASE_X = 26, CAT_BASE_X = W - 26;
+const GROUND_Y = H - 50;
+
+// ── Game data ─────────────────────────────────────────────────────────────────
+const UNIT_DEFS = {
+  pup:  { team:'dog', cost:20,  hp:40,  atk:8,  spd:1.05, range:40, atkSpd:55, size:22 },
+  lab:  { team:'dog', cost:40,  hp:100, atk:17, spd:0.70, range:46, atkSpd:70, size:28 },
+  wolf: { team:'dog', cost:70,  hp:65,  atk:30, spd:1.30, range:50, atkSpd:44, size:26 },
+  bear: { team:'dog', cost:120, hp:210, atk:42, spd:0.45, range:55, atkSpd:88, size:36 },
+  kit:  { team:'cat', cost:20,  hp:38,  atk:8,  spd:1.05, range:40, atkSpd:55, size:21 },
+  tom:  { team:'cat', cost:40,  hp:95,  atk:16, spd:0.70, range:46, atkSpd:70, size:27 },
+  lion: { team:'cat', cost:70,  hp:62,  atk:29, spd:1.30, range:50, atkSpd:44, size:25 },
+  tiger:{ team:'cat', cost:120, hp:200, atk:40, spd:0.45, range:55, atkSpd:88, size:34 },
+};
+
+const CFG = {
+  pup:  { bc:'#D4A574', dc:'#9A6530', sc:'#EED0A0', bw:16, bh:10, hr: 9, ll:13, lw:4, tw:4, v:'floppy'  },
+  lab:  { bc:'#C8922A', dc:'#8A601A', sc:'#EAC060', bw:20, bh:12, hr:11, ll:15, lw:5, tw:5, v:'floppy'  },
+  wolf: { bc:'#7A7A90', dc:'#484860', sc:'#AAAABB', bw:20, bh:11, hr:10, ll:15, lw:5, tw:5, v:'wolf'    },
+  bear: { bc:'#5E3A1A', dc:'#361E0A', sc:'#8A5C38', bw:25, bh:16, hr:14, ll:13, lw:7, tw:7, v:'bear'    },
+  kit:  { bc:'#ADADAD', dc:'#727272', sc:'#E0D0D0', bw:15, bh: 9, hr: 9, ll:12, lw:4, tw:3, v:'cat',  stripes:false },
+  tom:  { bc:'#E07B39', dc:'#A04810', sc:'#F0A860', bw:19, bh:11, hr:11, ll:13, lw:5, tw:4, v:'cat',  stripes:true  },
+  lion: { bc:'#C8922A', dc:'#8A601A', sc:'#EAC060', bw:22, bh:13, hr:13, ll:14, lw:6, tw:5, v:'lion', stripes:false },
+  tiger:{ bc:'#E07B39', dc:'#A04810', sc:'#F0A860', bw:25, bh:15, hr:14, ll:13, lw:7, tw:6, v:'tiger',stripes:true  },
+};
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let gold1=50, gold2=50, dogBaseHP=100, catBaseHP=100;
+let units=[], particles=[], gameOver=false, goldTimer=0;
+
+function createUnit(type, lane) {
+  const d = UNIT_DEFS[type];
+  const isDog = d.team==='dog';
+  return {
+    type, team:d.team,
+    x: isDog ? DOG_BASE_X+44 : CAT_BASE_X-44,
+    y: LANES[lane],
+    lane,
+    hp:d.hp, maxHp:d.hp, atk:d.atk,
+    spd: isDog ? d.spd : -d.spd,
+    range:d.range, atkSpd:d.atkSpd,
+    atkTimer:0, size:d.size,
+    state:'walk', shakeTimer:0, deathTimer:-1,
+    animPhase: Math.random()*Math.PI*2,
+  };
+}
+
+function pickLane(team) {
+  const c=[0,0,0,0];
+  for (const u of units) if (u.team===team) c[u.lane]++;
+  return c.indexOf(Math.min(...c));
+}
+
+function spawnUnit(type, player) {
+  if (gameOver) return;
+  const cost=UNIT_DEFS[type].cost;
+  if (player===1 && gold1<cost) return;
+  if (player===2 && gold2<cost) return;
+  if (player===1) gold1-=cost; else gold2-=cost;
+  updateGoldUI();
+  units.push(createUnit(type, pickLane(UNIT_DEFS[type].team)));
+}
+
+function updateGoldUI() {
+  document.getElementById('gold1').textContent=gold1;
+  document.getElementById('gold2').textContent=gold2;
+}
+
+// ── Particles ─────────────────────────────────────────────────────────────────
+function addHitParticles(x,y,color) {
+  for (let i=0;i<7;i++) {
+    const a=Math.random()*Math.PI*2, s=1.5+Math.random()*2.5;
+    particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:1,color,r:2+Math.random()*3});
+  }
+}
+function addDeathParticles(x,y) {
+  for (let i=0;i<14;i++) {
+    const a=Math.random()*Math.PI*2, s=2+Math.random()*4;
+    particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s-2,life:1,color:'#ffcc00',r:2+Math.random()*4});
+  }
+}
+
+// ── Drawing helpers ───────────────────────────────────────────────────────────
+function drawHPBar(x,y,w,h,hp,maxHp,color) {
+  const pct=Math.max(0,hp/maxHp);
+  ctx.fillStyle='#111'; ctx.fillRect(x,y,w,h);
+  ctx.fillStyle=color;  ctx.fillRect(x,y,w*pct,h);
+  ctx.strokeStyle='rgba(255,255,255,.2)'; ctx.lineWidth=1; ctx.strokeRect(x,y,w,h);
+}
+
+function drawLeg(x,y,angleDeg,len,w,color) {
+  ctx.save();
+  ctx.translate(x,y); ctx.rotate(angleDeg*Math.PI/180);
+  ctx.fillStyle=color;
+  ctx.beginPath(); ctx.roundRect(-w/2,0,w,len,w/2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0,len+1,w*.75,w*.45,0,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+// ── Dog renderer ──────────────────────────────────────────────────────────────
+function drawDog(cfg,t,walking,mouthOpen,lunge) {
+  const bob=Math.sin(t*7)*(walking?2.5:.6);
+  const ls =Math.sin(t*7)*(walking?30:6);
+  const {bw,bh,hr,ll,lw,tw,bc,dc,sc,v}=cfg;
+
+  drawLeg(bw*.45+lunge,bh+bob, ls-6,ll,lw,dc);
+  drawLeg(-bw*.5+lunge,bh+bob,-ls-6,ll,lw,dc);
+
+  ctx.fillStyle=bc;
+  ctx.beginPath(); ctx.ellipse(lunge,bob,bw,bh,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.07)';
+  ctx.beginPath(); ctx.ellipse(lunge,bob-2,bw*.65,bh*.55,0,0,Math.PI*2); ctx.fill();
+
+  const wag=Math.sin(t*5.5)*(walking?18:8);
+  ctx.strokeStyle=bc; ctx.lineWidth=tw; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-bw+lunge,bob);
+  if (v==='wolf') ctx.quadraticCurveTo(-bw-10+lunge,10+wag*.25,-bw-4+lunge,18+wag*.25);
+  else if (v==='bear') ctx.lineTo(-bw-9+lunge,bob-3+wag*.15);
+  else ctx.quadraticCurveTo(-bw-14+lunge,-10+wag,-bw-7+lunge,-24+wag*1.5);
+  ctx.stroke();
+
+  const hx=bw+5+lunge, hy=-bh+1+bob;
+  ctx.save(); ctx.translate(hx,hy);
+  ctx.fillStyle=bc; ctx.beginPath(); ctx.arc(0,0,hr,0,Math.PI*2); ctx.fill();
+
+  ctx.fillStyle=dc;
+  if (v==='floppy') {
+    ctx.beginPath(); ctx.ellipse(-hr*.42,hr*.55,hr*.36,hr*.68,-0.25,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse( hr*.22,hr*.60,hr*.30,hr*.62, 0.25,0,Math.PI*2); ctx.fill();
+  } else if (v==='wolf') {
+    ctx.beginPath(); ctx.moveTo(-hr*.52,-hr*.35); ctx.lineTo(-hr*.22,-hr*1.55); ctx.lineTo(hr*.12,-hr*.48); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(hr*.08,-hr*.52);  ctx.lineTo(hr*.4,-hr*1.55);  ctx.lineTo(hr*.72,-hr*.38); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#cc8877';
+    ctx.beginPath(); ctx.moveTo(-hr*.46,-hr*.45); ctx.lineTo(-hr*.22,-hr*1.3); ctx.lineTo(hr*.08,-hr*.55); ctx.closePath(); ctx.fill();
+  } else {
+    ctx.beginPath(); ctx.arc(-hr*.5,-hr*.72,hr*.42,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc( hr*.14,-hr*.8, hr*.42,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#aa6644';
+    ctx.beginPath(); ctx.arc(-hr*.5,-hr*.72,hr*.24,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc( hr*.14,-hr*.8, hr*.24,0,Math.PI*2); ctx.fill();
+  }
+
+  ctx.fillStyle=sc;
+  ctx.beginPath(); ctx.ellipse(hr*.78,hr*.24,hr*.50,hr*.36,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#111';
+  ctx.beginPath(); ctx.ellipse(hr*1.2,hr*.1,hr*.2,hr*.16,0,0,Math.PI*2); ctx.fill();
+
+  if (mouthOpen) {
+    ctx.fillStyle='#cc2222';
+    ctx.beginPath(); ctx.ellipse(hr*.88,hr*.52,hr*.3,hr*.2,0,0,Math.PI); ctx.fill();
+    ctx.fillStyle='white';
+    for (const tx of [hr*.68,hr*.86,hr*1.04]) {
+      ctx.beginPath(); ctx.moveTo(tx,hr*.48); ctx.lineTo(tx+hr*.08,hr*.64); ctx.lineTo(tx+hr*.16,hr*.48); ctx.closePath(); ctx.fill();
+    }
+  } else {
+    ctx.strokeStyle='#555'; ctx.lineWidth=1.2;
+    ctx.beginPath(); ctx.moveTo(hr*.7,hr*.44); ctx.quadraticCurveTo(hr*.9,hr*.60,hr*1.14,hr*.44); ctx.stroke();
+  }
+
+  ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(hr*.14,-hr*.22,hr*.22,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(hr*.23,-hr*.3,hr*.1,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+
+  drawLeg( bw*.45+lunge,bh+bob,-ls+6,ll,lw,bc);
+  drawLeg(-bw*.5+lunge, bh+bob, ls+6,ll,lw,bc);
+}
+
+// ── Cat renderer ──────────────────────────────────────────────────────────────
+function drawCat(cfg,t,walking,mouthOpen,lunge) {
+  const bob=Math.sin(t*7)*(walking?2.2:.6);
+  const ls =Math.sin(t*7)*(walking?28:5);
+  const {bw,bh,hr,ll,lw,bc,dc,sc,v,stripes}=cfg;
+  const tw_=cfg.tw;
+
+  drawLeg( bw*.45+lunge,bh+bob, ls-5,ll,lw,dc);
+  drawLeg(-bw*.50+lunge,bh+bob,-ls-5,ll,lw,dc);
+
+  ctx.fillStyle=bc; ctx.beginPath(); ctx.ellipse(lunge,bob,bw,bh,0,0,Math.PI*2); ctx.fill();
+
+  if (stripes) {
+    ctx.strokeStyle=dc; ctx.lineWidth=v==='tiger'?4:2.5; ctx.lineCap='round';
+    for (let i=-1;i<=1;i++) {
+      ctx.beginPath(); ctx.moveTo(lunge+i*bw*.34,bob-bh*.7); ctx.lineTo(lunge+i*bw*.34,bob+bh*.7); ctx.stroke();
+    }
+  }
+  ctx.fillStyle='rgba(255,255,255,.07)';
+  ctx.beginPath(); ctx.ellipse(lunge,bob-2,bw*.6,bh*.5,0,0,Math.PI*2); ctx.fill();
+
+  const wag=Math.sin(t*5)*(walking?14:6);
+  ctx.strokeStyle=bc; ctx.lineWidth=tw_; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(-bw+lunge,bob);
+  ctx.bezierCurveTo(-bw-10+lunge,-18+wag,-bw+8+lunge,-34+wag,-bw+18+lunge,-28+wag*.5);
+  ctx.stroke();
+  ctx.fillStyle=dc; ctx.beginPath(); ctx.arc(-bw+18+lunge,-28+wag*.5,tw_*1.1,0,Math.PI*2); ctx.fill();
+
+  const hx=bw+4+lunge, hy=-bh+1+bob;
+  ctx.save(); ctx.translate(hx,hy);
+  if (v==='lion') {
+    ctx.fillStyle='#7B3A0A'; ctx.beginPath(); ctx.arc(0,0,hr*1.45,0,Math.PI*2); ctx.fill();
+  }
+  ctx.fillStyle=bc; ctx.beginPath(); ctx.arc(0,0,hr,0,Math.PI*2); ctx.fill();
+
+  if (stripes) {
+    ctx.strokeStyle=dc; ctx.lineWidth=1.5; ctx.lineCap='round';
+    for (let i=-1;i<=1;i++) {
+      ctx.beginPath(); ctx.moveTo(i*hr*.3,-hr*.9); ctx.lineTo(i*hr*.18,-hr*.3); ctx.stroke();
+    }
+  }
+
+  ctx.fillStyle=dc;
+  ctx.beginPath(); ctx.moveTo(-hr*.55,-hr*.38); ctx.lineTo(-hr*.28,-hr*1.52); ctx.lineTo(hr*.08,-hr*.5); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(hr*.06,-hr*.52); ctx.lineTo(hr*.38,-hr*1.52); ctx.lineTo(hr*.68,-hr*.38); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#e899aa';
+  ctx.beginPath(); ctx.moveTo(-hr*.5,-hr*.45); ctx.lineTo(-hr*.28,-hr*1.28); ctx.lineTo(hr*.04,-hr*.56); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(hr*.1,-hr*.58); ctx.lineTo(hr*.36,-hr*1.28); ctx.lineTo(hr*.62,-hr*.44); ctx.closePath(); ctx.fill();
+
+  ctx.fillStyle=sc; ctx.beginPath(); ctx.arc(hr*.52,hr*.22,hr*.44,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#dd6699';
+  ctx.beginPath(); ctx.moveTo(hr*.85,hr*.08); ctx.lineTo(hr*.65,hr*.28); ctx.lineTo(hr*1.05,hr*.28); ctx.closePath(); ctx.fill();
+
+  if (mouthOpen) {
+    ctx.fillStyle='#cc2222'; ctx.beginPath(); ctx.ellipse(hr*.85,hr*.5,hr*.28,hr*.18,0,0,Math.PI); ctx.fill();
+    ctx.fillStyle='white';
+    ctx.beginPath(); ctx.moveTo(hr*.65,hr*.47); ctx.lineTo(hr*.73,hr*.62); ctx.lineTo(hr*.83,hr*.47); ctx.closePath(); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(hr*.88,hr*.47); ctx.lineTo(hr*.96,hr*.62); ctx.lineTo(hr*1.06,hr*.47); ctx.closePath(); ctx.fill();
+  } else {
+    ctx.strokeStyle='#888'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(hr*.85,hr*.3); ctx.quadraticCurveTo(hr*.68,hr*.52,hr*.5,hr*.48); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(hr*.85,hr*.3); ctx.quadraticCurveTo(hr*1.02,hr*.52,hr*1.22,hr*.48); ctx.stroke();
+  }
+
+  ctx.strokeStyle='rgba(255,255,255,.65)'; ctx.lineWidth=.9;
+  for (let i=0;i<3;i++) {
+    const wy=hr*(.06+i*.12);
+    ctx.beginPath(); ctx.moveTo(hr*.38,wy); ctx.lineTo(hr*1.85,wy-3+i*2.5); ctx.stroke();
+  }
+
+  ctx.fillStyle='#224411'; ctx.beginPath(); ctx.arc(hr*.14,-hr*.22,hr*.22,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#55cc33'; ctx.beginPath(); ctx.arc(hr*.14,-hr*.22,hr*.17,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#111';   ctx.beginPath(); ctx.ellipse(hr*.14,-hr*.22,hr*.055,hr*.155,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.8)'; ctx.beginPath(); ctx.arc(hr*.2,-hr*.3,hr*.07,0,Math.PI*2); ctx.fill();
+
+  ctx.restore();
+  drawLeg( bw*.45+lunge,bh+bob,-ls+5,ll,lw,bc);
+  drawLeg(-bw*.50+lunge,bh+bob, ls+5,ll,lw,bc);
+}
+
+// ── Unit draw ─────────────────────────────────────────────────────────────────
+function drawUnit(u) {
+  if (u.deathTimer>=0) return;
+  const cfg=CFG[u.type], s=u.size/28;
+  const shake=u.shakeTimer>0?(Math.random()-.5)*4:0;
+  const atkProg=u.state==='attack'?u.atkTimer/u.atkSpd:0;
+  const lunge=Math.sin(atkProg*Math.PI)*6;
+  const mouthOpen=u.state==='attack'&&atkProg>.28&&atkProg<.78;
+  const walking=u.state==='walk';
+
+  ctx.save();
+  ctx.translate(u.x+shake,u.y+shake);
+  if (u.team==='cat') ctx.scale(-1,1);
+  ctx.scale(s,s);
+  if (u.team==='dog') drawDog(cfg,u.animPhase,walking,mouthOpen,lunge);
+  else                drawCat(cfg,u.animPhase,walking,mouthOpen,lunge);
+  ctx.restore();
+
+  const bw2=u.size*1.8;
+  drawHPBar(u.x+shake-bw2/2,u.y+shake-u.size*.72-13,bw2,5,u.hp,u.maxHp,
+    u.team==='dog'?'#60a5fa':'#f87171');
+}
+
+// ── Scene ─────────────────────────────────────────────────────────────────────
+function drawScene() {
+  const sky=ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,'#0f0528'); sky.addColorStop(1,'#1e0a3c');
+  ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
+
+  ctx.fillStyle='rgba(255,255,255,.5)';
+  for (const s of [37,73,109,151,197,241,277,313,349,383,419,457,491]) {
+    ctx.beginPath(); ctx.arc((s*53)%W,(s*37)%80+5,.8,0,Math.PI*2); ctx.fill();
+  }
+
+  ctx.fillStyle='#2d4a1e'; ctx.fillRect(0,GROUND_Y,W,H-GROUND_Y);
+  ctx.fillStyle='#3d6a2e'; ctx.fillRect(0,GROUND_Y,W,8);
+
+  ctx.setLineDash([10,20]); ctx.lineWidth=1;
+  for (const ly of LANES) {
+    ctx.strokeStyle='rgba(255,255,255,.05)';
+    ctx.beginPath(); ctx.moveTo(0,ly+22); ctx.lineTo(W,ly+22); ctx.stroke();
+  }
+  ctx.setLineDash([]);
+  ctx.strokeStyle='rgba(168,85,247,.2)'; ctx.lineWidth=2;
+  ctx.setLineDash([6,12]);
+  ctx.beginPath(); ctx.moveTo(W/2,30); ctx.lineTo(W/2,GROUND_Y); ctx.stroke();
+  ctx.setLineDash([]);
+
+  drawBase(DOG_BASE_X,dogBaseHP,'#60a5fa','🏠');
+  drawBase(CAT_BASE_X,catBaseHP,'#f87171','🏰');
+
+  for (const u of units) {
+    if (u.deathTimer>=0) continue;
+    ctx.fillStyle='rgba(0,0,0,.25)';
+    ctx.beginPath(); ctx.ellipse(u.x,GROUND_Y+4,u.size*.6,u.size*.18,0,0,Math.PI*2); ctx.fill();
+  }
+}
+
+function drawBase(bx,hp,color,emoji) {
+  const cy=H/2-20;
+  ctx.shadowColor=color; ctx.shadowBlur=18;
+  ctx.font='34px serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(emoji,bx,cy); ctx.shadowBlur=0;
+  drawHPBar(bx-26,cy+26,52,9,hp,100,color);
+  ctx.font='bold 10px Segoe UI'; ctx.fillStyle=color;
+  ctx.fillText(`${hp}/100`,bx,cy+44);
+}
+
+function drawHUD() {
+  ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(0,0,W,30);
+  ctx.font='bold 12px Segoe UI'; ctx.textBaseline='middle';
+  ctx.textAlign='left';  ctx.fillStyle='#93c5fd'; ctx.fillText(`🏠 Kutyák  🪙${gold1}`,8,15);
+  ctx.textAlign='right'; ctx.fillStyle='#fca5a5'; ctx.fillText(`🪙${gold2}  Macskák 🏰`,W-8,15);
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    ctx.globalAlpha=p.life; ctx.fillStyle=p.color;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r*p.life,0,Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+
+// ── Logic ─────────────────────────────────────────────────────────────────────
+function findEnemy(u) {
+  let best=null,bestDist=Infinity;
+  for (const o of units) {
+    if (o.team===u.team||o.deathTimer>=0||o.lane!==u.lane) continue;
+    const dx=o.x-u.x;
+    if (u.team==='dog'?dx<=0:dx>=0) continue;
+    const d=Math.abs(dx);
+    if (d<bestDist){bestDist=d;best=o;}
+  }
+  return {enemy:best,dist:bestDist};
+}
+
+function update() {
+  if (gameOver) return;
+  goldTimer++;
+  if (goldTimer>=90){gold1+=8;gold2+=8;updateGoldUI();goldTimer=0;}
+
+  for (const u of units) {
+    if (u.deathTimer>=0){u.deathTimer++;continue;}
+    if (u.shakeTimer>0) u.shakeTimer--;
+    const {enemy,dist}=findEnemy(u);
+    const baseX=u.team==='dog'?CAT_BASE_X:DOG_BASE_X;
+    const baseDist=Math.abs(baseX-u.x);
+
+    if (enemy&&dist<=u.range) {
+      u.state='attack'; u.atkTimer++;
+      if (u.atkTimer>=u.atkSpd) {
+        u.atkTimer=0; enemy.hp-=u.atk; enemy.shakeTimer=8;
+        addHitParticles(enemy.x,enemy.y,u.team==='dog'?'#60a5fa99':'#f8717199');
+        if (enemy.hp<=0) {
+          addDeathParticles(enemy.x,enemy.y); enemy.deathTimer=0;
+          const reward=10+Math.floor(UNIT_DEFS[enemy.type].cost*.4);
+          if (u.team==='dog') gold1+=reward; else gold2+=reward;
+          updateGoldUI();
+        }
+      }
+    } else if (!enemy&&baseDist<=u.range+20) {
+      u.state='attack'; u.atkTimer++;
+      if (u.atkTimer>=u.atkSpd) {
+        u.atkTimer=0;
+        if (u.team==='dog'){catBaseHP-=u.atk;addHitParticles(CAT_BASE_X,H/2-20,'#f8717199');}
+        else{dogBaseHP-=u.atk;addHitParticles(DOG_BASE_X,H/2-20,'#60a5fa99');}
+      }
+    } else {
+      u.state='walk'; u.atkTimer=0; u.x+=u.spd;
+    }
+    u.animPhase+=u.state==='walk'?Math.abs(u.spd)*.22:.045;
+  }
+
+  units=units.filter(u=>u.deathTimer<28);
+  for (const p of particles){p.x+=p.vx;p.y+=p.vy;p.vy+=.12;p.life-=.03;}
+  particles=particles.filter(p=>p.life>0);
+
+  dogBaseHP=Math.max(0,dogBaseHP); catBaseHP=Math.max(0,catBaseHP);
+  if (catBaseHP<=0) endGame('dog');
+  if (dogBaseHP<=0) endGame('cat');
+}
+
+function endGame(winner) {
+  gameOver=true;
+  const rt=document.getElementById('result-text');
+  document.getElementById('overlay').classList.add('visible');
+  if (winner==='dog'){rt.textContent='🐕 A kutyák nyertek! 🎉';rt.style.color='#60a5fa';}
+  else{rt.textContent='🐱 A macskák nyertek! 😼';rt.style.color='#f87171';}
+}
+
+document.getElementById('restart-btn').addEventListener('click',()=>{
+  gold1=50;gold2=50;dogBaseHP=100;catBaseHP=100;
+  units=[];particles=[];gameOver=false;goldTimer=0;
+  updateGoldUI();
+  document.getElementById('overlay').classList.remove('visible');
+});
+
+// Prevent double-fire on touch (ontouchstart + onclick)
+document.querySelectorAll('.unit-btn').forEach(btn => {
+  btn.addEventListener('touchstart', e => e.preventDefault(), {passive:false});
+});
+
+function gameLoop() {
+  update(); drawScene();
+  for (const u of units) drawUnit(u);
+  drawParticles(); drawHUD();
+  requestAnimationFrame(gameLoop);
+}
+updateGoldUI();
+gameLoop();
+</script>
+</body>
+</html>
