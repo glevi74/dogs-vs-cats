@@ -608,10 +608,15 @@ function mpHandleMessage(msg) {
   }
 
   else if (d.type === 'GAMEOVER') {
-    // Szinkronizáljuk az eredményt ha eltér
+    // A guest megkapja a host döntését — UI megjelenítés, újraküldés nélkül
     if (!gameOver) {
       gameOver = true;
-      showGameOver(d.winner, false);
+      document.getElementById('overlay').classList.add('visible');
+      document.getElementById('ai-thinking').textContent = '';
+      document.getElementById('mp-conn-row').style.display = 'none';
+      const rt = document.getElementById('result-text');
+      if (d.winner === 'dog') { rt.textContent = '🐕 A kutyák nyertek! 🎉'; rt.style.color = '#60a5fa'; }
+      else                    { rt.textContent = '🐱 A macskák nyertek! 😼'; rt.style.color = '#f87171'; }
     }
   }
 }
@@ -819,8 +824,11 @@ function update() {
   for (const p of particles){p.x+=p.vx;p.y+=p.vy;p.vy+=.12;p.life-=.03;}
 
   dogBaseHP=Math.max(0,dogBaseHP); catBaseHP=Math.max(0,catBaseHP);
-  if (catBaseHP<=0) { gameOver=true; showGameOver('dog'); }
-  if (dogBaseHP<=0) { gameOver=true; showGameOver('cat'); }
+  // Online módban csak a host detektálja a game over-t (megelőzi a race condition-t)
+  if (!mpMode || mpRole === 'host') {
+    if (catBaseHP<=0) { gameOver=true; showGameOver('dog'); }
+    if (dogBaseHP<=0) { gameOver=true; showGameOver('cat'); }
+  }
 }
 
 function showGameOver(winner, opponentLeft=false) {
@@ -833,8 +841,8 @@ function showGameOver(winner, opponentLeft=false) {
   else               {rt.textContent='🐱 A macskák nyertek! 😼';rt.style.color='#f87171';}
   if (opponentLeft) { connRow.style.display='block'; connRow.textContent='⚠ Az ellenfél kilépett.'; connRow.style.color='#fbbf24'; }
   else connRow.style.display='none';
-  // Broadcast online módban
-  if (mpMode && mpChannel && !opponentLeft) {
+  // Broadcast online módban — csak a host küldi, hogy elkerüljük a dupla küldést
+  if (mpMode && mpChannel && !opponentLeft && mpRole === 'host') {
     mpChannel.publish('game-event', { type:'GAMEOVER', winner });
   }
 }
