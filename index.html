@@ -313,11 +313,12 @@ const ABLY_KEY = 'F_gllg.TQoQNQ:BRjL8ZQw8EX5sPnWNjAhhCKmVjjq8u92Q2ISmMBWP2o';
 // ── Responsive scaling ────────────────────────────────────────────────────────
 const GAME_W = 800, GAME_H = 490;
 function scaleGame() {
-  const s = Math.min(window.innerWidth / GAME_W, window.innerHeight / GAME_H);
   const w = document.getElementById('wrapper');
+  const wH = w.offsetHeight || GAME_H; // tényleges wrapper magasság (canvas + UI panel)
+  const s = Math.min(window.innerWidth / GAME_W, window.innerHeight / wH);
   w.style.transform = `scale(${s})`;
   w.style.left = (window.innerWidth  - GAME_W * s) / 2 + 'px';
-  w.style.top  = (window.innerHeight - GAME_H * s) / 2 + 'px';
+  w.style.top  = (window.innerHeight - wH    * s) / 2 + 'px';
 }
 window.addEventListener('resize', scaleGame);
 scaleGame();
