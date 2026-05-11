@@ -824,11 +824,9 @@ function update() {
   for (const p of particles){p.x+=p.vx;p.y+=p.vy;p.vy+=.12;p.life-=.03;}
 
   dogBaseHP=Math.max(0,dogBaseHP); catBaseHP=Math.max(0,catBaseHP);
-  // Online módban csak a host detektálja a game over-t (megelőzi a race condition-t)
-  if (!mpMode || mpRole === 'host') {
-    if (catBaseHP<=0) { gameOver=true; showGameOver('dog'); }
-    if (dogBaseHP<=0) { gameOver=true; showGameOver('cat'); }
-  }
+  // Mindkét fél detektál lokálisan — a showGameOver()-ben van a host-only publish guard
+  if      (catBaseHP<=0) { gameOver=true; showGameOver('dog'); }
+  else if (dogBaseHP<=0) { gameOver=true; showGameOver('cat'); }
 }
 
 function showGameOver(winner, opponentLeft=false) {
