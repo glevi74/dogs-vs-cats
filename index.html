@@ -51,7 +51,6 @@
     background:#2d1b69; border-radius:8px;
     padding:8px 3px; cursor:pointer;
     border:2px solid transparent;
-    /* Larger touch target */
     min-height:72px; justify-content:center;
     transition:filter .1s;
     -webkit-user-select:none;
@@ -77,6 +76,42 @@
     cursor:pointer; font-weight:bold;
     min-width:200px;
   }
+
+  /* ── AI mód ── */
+  .header-left { display:flex; align-items:center; gap:6px; }
+  .ai-toggle {
+    font-size:.68rem; padding:2px 7px;
+    border-radius:5px; cursor:pointer;
+    border:1px solid #6b21a8; background:#2d1b69;
+    color:#c084fc; font-weight:bold;
+    transition:all .15s; user-select:none;
+  }
+  .ai-toggle.on {
+    background:#6d28d9; border-color:#a855f7; color:#fff;
+  }
+  .diff-row {
+    display:flex; gap:4px;
+    overflow:hidden;
+    max-height:0; opacity:0;
+    transition:max-height .2s, opacity .2s;
+  }
+  .diff-row.visible { max-height:30px; opacity:1; }
+  .diff-btn {
+    flex:1; text-align:center;
+    font-size:.62rem; padding:3px 2px;
+    border-radius:5px; cursor:pointer;
+    background:#1a0d30; border:1px solid #4a2060;
+    color:#666; user-select:none; transition:all .15s;
+  }
+  .diff-btn.easy.on   { background:#14532d; border-color:#22c55e; color:#86efac; }
+  .diff-btn.medium.on { background:#78350f; border-color:#f59e0b; color:#fcd34d; }
+  .diff-btn.hard.on   { background:#7f1d1d; border-color:#ef4444; color:#fca5a5; }
+  .ai-thinking {
+    font-size:.65rem; color:#a78bfa; text-align:center;
+    height:14px; letter-spacing:.05em;
+  }
+  #p2-unit-row { transition:opacity .2s; }
+  #p2-unit-row.ai-on { opacity:.2; pointer-events:none; }
 </style>
 </head>
 <body>
@@ -110,13 +145,23 @@
         </div>
       </div>
     </div>
-    <!-- Player 2: Cats -->
+    <!-- Player 2 / AI: Cats -->
     <div class="player-panel p2">
       <div class="panel-header">
-        <span>🐱 2. Játékos</span>
+        <div class="header-left">
+          <span>🐱 2. Játékos</span>
+          <span class="ai-toggle" id="ai-toggle" onclick="toggleAI()">🤖 AI</span>
+        </div>
         <span class="gold-display">🪙<span id="gold2">50</span></span>
       </div>
-      <div class="unit-row">
+      <!-- Nehézség választó -->
+      <div class="diff-row" id="diff-row">
+        <div class="diff-btn easy on" id="diff-easy"   onclick="setDiff('easy')">😺 Könnyű</div>
+        <div class="diff-btn medium"  id="diff-medium" onclick="setDiff('medium')">😼 Közepes</div>
+        <div class="diff-btn hard"    id="diff-hard"   onclick="setDiff('hard')">😾 Nehéz</div>
+      </div>
+      <div class="ai-thinking" id="ai-thinking"></div>
+      <div class="unit-row" id="p2-unit-row">
         <div class="unit-btn" ontouchstart="spawnUnit('kit',2)" onclick="spawnUnit('kit',2)">
           <span class="ico">🐾</span><span class="uname">Kölyök</span><span class="ucost">🪙20</span>
         </div>
@@ -136,7 +181,7 @@
 
 <script>
 // ── Responsive scaling ────────────────────────────────────────────────────────
-const GAME_W = 800, GAME_H = 490; // canvas(390) + ui(~100)
+const GAME_W = 800, GAME_H = 490;
 function scaleGame() {
   const s = Math.min(window.innerWidth / GAME_W, window.innerHeight / GAME_H);
   const wrapper = document.getElementById('wrapper');
@@ -185,42 +230,168 @@ const CFG = {
 let gold1=50, gold2=50, dogBaseHP=100, catBaseHP=100;
 let units=[], particles=[], gameOver=false, goldTimer=0;
 
-function createUnit(type, lane) {
-  const d = UNIT_DEFS[type];
-  const isDog = d.team==='dog';
-  return {
-    type, team:d.team,
-    x: isDog ? DOG_BASE_X+44 : CAT_BASE_X-44,
-    y: LANES[lane],
-    lane,
-    hp:d.hp, maxHp:d.hp, atk:d.atk,
-    spd: isDog ? d.spd : -d.spd,
-    range:d.range, atkSpd:d.atkSpd,
-    atkTimer:0, size:d.size,
-    state:'walk', shakeTimer:0, deathTimer:-1,
-    animPhase: Math.random()*Math.PI*2,
-  };
+// ── AI state ──────────────────────────────────────────────────────────────────
+let aiMode = false;
+let aiDiff = 'easy';
+let aiTimer = 0;
+let aiNextThink = 0;
+let aiThinkingDots = 0;
+let aiDotTimer = 0;
+
+// Nehézségi beállítások: [alap intervallum, jitter, spórolási küszöb]
+const AI_CFG = {
+  easy:   { base:220, jitter:90,  saveAt:0   },
+  medium: { base:115, jitter:45,  saveAt:80  },
+  hard:   { base:55,  jitter:20,  saveAt:95  },
+};
+
+function toggleAI() {
+  aiMode = !aiMode;
+  document.getElementById('ai-toggle').classList.toggle('on', aiMode);
+  document.getElementById('diff-row').classList.toggle('visible', aiMode);
+  document.getElementById('p2-unit-row').classList.toggle('ai-on', aiMode);
+  document.getElementById('ai-thinking').textContent = '';
+  aiTimer = 0;
+  aiNextThink = calcNextThink();
 }
 
-function pickLane(team) {
-  const c=[0,0,0,0];
-  for (const u of units) if (u.team===team) c[u.lane]++;
-  return c.indexOf(Math.min(...c));
+function setDiff(d) {
+  aiDiff = d;
+  ['easy','medium','hard'].forEach(x => {
+    document.getElementById('diff-'+x).classList.toggle('on', x===d);
+  });
+  aiNextThink = calcNextThink();
 }
 
-function spawnUnit(type, player) {
-  if (gameOver) return;
-  const cost=UNIT_DEFS[type].cost;
-  if (player===1 && gold1<cost) return;
-  if (player===2 && gold2<cost) return;
-  if (player===1) gold1-=cost; else gold2-=cost;
-  updateGoldUI();
-  units.push(createUnit(type, pickLane(UNIT_DEFS[type].team)));
+function calcNextThink() {
+  const c = AI_CFG[aiDiff];
+  return c.base + Math.floor(Math.random() * c.jitter * 2) - c.jitter;
 }
 
-function updateGoldUI() {
-  document.getElementById('gold1').textContent=gold1;
-  document.getElementById('gold2').textContent=gold2;
+// ── AI logika ─────────────────────────────────────────────────────────────────
+function aiThink() {
+  if (!aiMode || gameOver) return;
+
+  // Gondolkodó animáció
+  aiDotTimer++;
+  if (aiDotTimer >= 18) {
+    aiDotTimer = 0;
+    aiThinkingDots = (aiThinkingDots + 1) % 4;
+    document.getElementById('ai-thinking').textContent =
+      aiMode ? '🤖 ' + '●'.repeat(aiThinkingDots) + '○'.repeat(3-aiThinkingDots) : '';
+  }
+
+  aiTimer++;
+  if (aiTimer < aiNextThink) return;
+  aiTimer = 0;
+  aiNextThink = calcNextThink();
+
+  const type = aiPickUnit();
+  if (type) spawnUnit(type, 2);
+}
+
+function aiPickUnit() {
+  const alive = u => u.deathTimer < 0;
+  const dogs = units.filter(u => u.team==='dog' && alive(u));
+  const cats = units.filter(u => u.team==='cat' && alive(u));
+  const allTypes = ['kit','tom','lion','tiger'];
+  const affordable = allTypes.filter(t => gold2 >= UNIT_DEFS[t].cost);
+  if (!affordable.length) return null;
+
+  if (aiDiff === 'easy') return aiPickEasy(affordable);
+  if (aiDiff === 'medium') return aiPickMedium(dogs, affordable);
+  return aiPickHard(dogs, cats, affordable);
+}
+
+// Könnyű: véletlenszerű, olcsóbbakat preferálja
+function aiPickEasy(affordable) {
+  // 70% eséllyel a legolcsóbbat küldi
+  if (Math.random() < 0.7) return affordable[0];
+  return affordable[Math.floor(Math.random() * affordable.length)];
+}
+
+// Közepes: alapvető reakció az ellenségre
+function aiPickMedium(dogs, affordable) {
+  if (!dogs.length) {
+    // Nincs ellenség → tom, ha megengedi az arány
+    return affordable.includes('tom') ? 'tom' : affordable[0];
+  }
+
+  const totalHP  = dogs.reduce((s,u) => s+u.hp, 0);
+  const totalAtk = dogs.reduce((s,u) => s+u.atk, 0);
+  const avgAtk   = totalAtk / dogs.length;
+
+  // Sok HP az ellenfélen → nagy sebzésű egység kell
+  if (totalHP > 250 && affordable.includes('tiger')) return 'tiger';
+  if (totalHP > 120 && affordable.includes('lion'))  return 'lion';
+  // Erős sebesítők → kemény unit kell
+  if (avgAtk > 22   && affordable.includes('tiger')) return 'tiger';
+  if (avgAtk > 14   && affordable.includes('tom'))   return 'tom';
+
+  // Random a megfizethetők közül
+  return affordable[Math.floor(Math.random() * affordable.length)];
+}
+
+// Nehéz: lane-elemzés, counter-stratégia, arany-menedzsment
+function aiPickHard(dogs, cats, affordable) {
+  const alive = u => u.deathTimer < 0;
+
+  // Alap védelmi helyzet
+  if (catBaseHP < 35) {
+    // Kritikus: mindent bevetünk
+    return affordable[affordable.length - 1];
+  }
+
+  // Arany spórolás tigrisre, ha közel vagyunk
+  const c = AI_CFG['hard'];
+  if (!affordable.includes('tiger') && gold2 >= c.saveAt) {
+    return null; // várunk a tigrisre
+  }
+
+  if (!dogs.length) {
+    // Senki nincs → nyomás alá helyezzük az ellenfelet
+    if (affordable.includes('lion'))  return 'lion';  // gyors push
+    if (affordable.includes('tom'))   return 'tom';
+    return affordable[0];
+  }
+
+  // Ellenség összetételének elemzése
+  const count = {};
+  for (const u of dogs) count[u.type] = (count[u.type]||0) + 1;
+
+  // Lane-fenyegetés: melyik sávban van a legtöbb ellenség?
+  const laneThreat = [0,0,0,0];
+  for (const u of dogs) laneThreat[u.lane] += u.hp * 0.01 + u.atk * 0.05;
+  const maxThreatLane = laneThreat.indexOf(Math.max(...laneThreat));
+
+  // Konkrét counter-döntések
+  // Medvék → oroszlánok (gyorsak, átmegyenek mellettük)
+  if ((count.bear||0) >= 1 && affordable.includes('lion')) return 'lion';
+
+  // Farkas hullám → tigris (magas HP elnyeli a sebzést)
+  if ((count.wolf||0) >= 2 && affordable.includes('tiger')) return 'tiger';
+
+  // Kölyök spam → tom (hatékonyan kezeli a sok gyenge egységet)
+  if ((count.pup||0) >= 3 && affordable.includes('tom')) return 'tom';
+
+  // Labrador vonalak → oroszlán (gyors, bázist célozza)
+  if ((count.lab||0) >= 2 && affordable.includes('lion')) return 'lion';
+
+  // Ha a saját sávjaink üresen állnak, de az ellenség nyom
+  const myLanes = [0,0,0,0];
+  for (const u of cats) myLanes[u.lane]++;
+  const emptyThreatened = myLanes[maxThreatLane] === 0;
+  if (emptyThreatened) {
+    // Sürgősen küldünk valamit a fenyegetett sávba
+    return affordable.includes('tom') ? 'tom' :
+           affordable.includes('kit') ? 'kit' : affordable[0];
+  }
+
+  // Alapértelmezett: legjobb amit megengedhetünk
+  if (affordable.includes('tiger')) return 'tiger';
+  if (affordable.includes('lion'))  return 'lion';
+  if (affordable.includes('tom'))   return 'tom';
+  return 'kit';
 }
 
 // ── Particles ─────────────────────────────────────────────────────────────────
@@ -474,7 +645,9 @@ function drawHUD() {
   ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(0,0,W,30);
   ctx.font='bold 12px Segoe UI'; ctx.textBaseline='middle';
   ctx.textAlign='left';  ctx.fillStyle='#93c5fd'; ctx.fillText(`🏠 Kutyák  🪙${gold1}`,8,15);
-  ctx.textAlign='right'; ctx.fillStyle='#fca5a5'; ctx.fillText(`🪙${gold2}  Macskák 🏰`,W-8,15);
+  ctx.textAlign='right';
+  const p2label = aiMode ? `🤖 AI (${aiDiff==='easy'?'😺':aiDiff==='medium'?'😼':'😾'})` : '2. Játékos';
+  ctx.fillStyle='#fca5a5'; ctx.fillText(`🪙${gold2}  ${p2label} 🏰`,W-8,15);
 }
 
 function drawParticles() {
@@ -486,6 +659,44 @@ function drawParticles() {
 }
 
 // ── Logic ─────────────────────────────────────────────────────────────────────
+function createUnit(type, lane) {
+  const d = UNIT_DEFS[type];
+  const isDog = d.team==='dog';
+  return {
+    type, team:d.team,
+    x: isDog ? DOG_BASE_X+44 : CAT_BASE_X-44,
+    y: LANES[lane],
+    lane,
+    hp:d.hp, maxHp:d.hp, atk:d.atk,
+    spd: isDog ? d.spd : -d.spd,
+    range:d.range, atkSpd:d.atkSpd,
+    atkTimer:0, size:d.size,
+    state:'walk', shakeTimer:0, deathTimer:-1,
+    animPhase: Math.random()*Math.PI*2,
+  };
+}
+
+function pickLane(team) {
+  const c=[0,0,0,0];
+  for (const u of units) if (u.team===team) c[u.lane]++;
+  return c.indexOf(Math.min(...c));
+}
+
+function spawnUnit(type, player) {
+  if (gameOver) return;
+  const cost=UNIT_DEFS[type].cost;
+  if (player===1 && gold1<cost) return;
+  if (player===2 && gold2<cost) return;
+  if (player===1) gold1-=cost; else gold2-=cost;
+  updateGoldUI();
+  units.push(createUnit(type, pickLane(UNIT_DEFS[type].team)));
+}
+
+function updateGoldUI() {
+  document.getElementById('gold1').textContent=gold1;
+  document.getElementById('gold2').textContent=gold2;
+}
+
 function findEnemy(u) {
   let best=null,bestDist=Infinity;
   for (const o of units) {
@@ -502,6 +713,9 @@ function update() {
   if (gameOver) return;
   goldTimer++;
   if (goldTimer>=90){gold1+=8;gold2+=8;updateGoldUI();goldTimer=0;}
+
+  // AI gondolkodik
+  aiThink();
 
   for (const u of units) {
     if (u.deathTimer>=0){u.deathTimer++;continue;}
@@ -548,6 +762,7 @@ function endGame(winner) {
   gameOver=true;
   const rt=document.getElementById('result-text');
   document.getElementById('overlay').classList.add('visible');
+  document.getElementById('ai-thinking').textContent='';
   if (winner==='dog'){rt.textContent='🐕 A kutyák nyertek! 🎉';rt.style.color='#60a5fa';}
   else{rt.textContent='🐱 A macskák nyertek! 😼';rt.style.color='#f87171';}
 }
@@ -555,13 +770,25 @@ function endGame(winner) {
 document.getElementById('restart-btn').addEventListener('click',()=>{
   gold1=50;gold2=50;dogBaseHP=100;catBaseHP=100;
   units=[];particles=[];gameOver=false;goldTimer=0;
+  aiTimer=0; aiNextThink=calcNextThink(); aiThinkingDots=0; aiDotTimer=0;
   updateGoldUI();
   document.getElementById('overlay').classList.remove('visible');
 });
 
-// Prevent double-fire on touch (ontouchstart + onclick)
+// Touch double-fire megelőzése
 document.querySelectorAll('.unit-btn').forEach(btn => {
   btn.addEventListener('touchstart', e => e.preventDefault(), {passive:false});
+});
+
+// AI gomb touch
+document.getElementById('ai-toggle').addEventListener('touchstart', e => {
+  e.preventDefault(); toggleAI();
+}, {passive:false});
+['diff-easy','diff-medium','diff-hard'].forEach(id => {
+  document.getElementById(id).addEventListener('touchstart', e => {
+    e.preventDefault();
+    setDiff(id.replace('diff-',''));
+  }, {passive:false});
 });
 
 function gameLoop() {
@@ -571,6 +798,7 @@ function gameLoop() {
   requestAnimationFrame(gameLoop);
 }
 updateGoldUI();
+aiNextThink = calcNextThink();
 gameLoop();
 </script>
 </body>
