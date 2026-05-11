@@ -581,6 +581,7 @@ function copyRoomCode() {
 
 // ── Multiplayer üzenetkezelő ──────────────────────────────────────────────────
 function mpHandleMessage(msg) {
+  try {
   if (!mpMode) return;
   const d = msg.data;
 
@@ -596,10 +597,11 @@ function mpHandleMessage(msg) {
   else if (d.type === 'SYNC') {
     // Csak a guest fogadja a host autoritatív state-jét
     if (mpRole !== 'guest') return;
-    if (Math.abs(dogBaseHP - d.dogHP) > 4) dogBaseHP = d.dogHP;
-    if (Math.abs(catBaseHP - d.catHP) > 4) catBaseHP = d.catHP;
-    if (Math.abs(gold1     - d.g1)    > 8) { gold1 = d.g1; updateGoldUI(); }
-    if (Math.abs(gold2     - d.g2)    > 8) { gold2 = d.g2; updateGoldUI(); }
+    // HP-t mindig felülírjuk — küszöb nélkül, hogy 0-ra szinkronizáljon game over előtt
+    dogBaseHP = d.dogHP;
+    catBaseHP = d.catHP;
+    if (Math.abs(gold1 - d.g1) > 8) { gold1 = d.g1; updateGoldUI(); }
+    if (Math.abs(gold2 - d.g2) > 8) { gold2 = d.g2; updateGoldUI(); }
   }
 
   else if (d.type === 'RESTART') {
@@ -619,6 +621,7 @@ function mpHandleMessage(msg) {
       else                    { rt.textContent = '🐱 A macskák nyertek! 😼'; rt.style.color = '#f87171'; }
     }
   }
+  } catch(e) { console.error('mpHandleMessage hiba:', e); }
 }
 
 function mpSendSync() {
@@ -839,9 +842,15 @@ function showGameOver(winner, opponentLeft=false) {
   else               {rt.textContent='🐱 A macskák nyertek! 😼';rt.style.color='#f87171';}
   if (opponentLeft) { connRow.style.display='block'; connRow.textContent='⚠ Az ellenfél kilépett.'; connRow.style.color='#fbbf24'; }
   else connRow.style.display='none';
-  // Broadcast online módban — csak a host küldi, hogy elkerüljük a dupla küldést
+  // Broadcast online módban — csak a host küldi
   if (mpMode && mpChannel && !opponentLeft && mpRole === 'host') {
-    mpChannel.publish('game-event', { type:'GAMEOVER', winner });
+    // 1) Azonnali SYNC: a guest HP-ja biztosan 0-ra áll
+    mpChannel.publish('game-event', { type:'SYNC', dogHP:dogBaseHP, catHP:catBaseHP, g1:gold1, g2:gold2 });
+    // 2) GAMEOVER 3x egymás után (azonnali + 500ms + 1500ms), hogy biztosan megérkezzen
+    const goMsg = { type:'GAMEOVER', winner };
+    mpChannel.publish('game-event', goMsg);
+    setTimeout(() => { if (mpChannel) mpChannel.publish('game-event', goMsg); }, 500);
+    setTimeout(() => { if (mpChannel) mpChannel.publish('game-event', goMsg); }, 1500);
   }
 }
 
