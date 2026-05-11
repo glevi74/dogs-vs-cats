@@ -506,7 +506,7 @@ function mpJoinRoom() {
       if (!host) {
         showLobbySection('lobby-main');
         showLobbyError('Szoba nem található: ' + code);
-        return;
+        return Promise.reject('NOT_FOUND');
       }
       mpChannel.subscribe('game-event', mpHandleMessage);
       mpChannel.presence.subscribe('leave', member => {
@@ -514,12 +514,12 @@ function mpJoinRoom() {
       });
       return mpChannel.presence.enter({ role: 'guest' });
     })
-    .then(v => {
-      if (v === undefined) return; // 'room not found' ág
+    .then(() => {
       mpConnected = true;
       mpStartOnlineGame();
     })
     .catch(e => {
+      if (e === 'NOT_FOUND') return; // már kezeltük fent
       showLobbySection('lobby-main');
       showLobbyError('Csatlakozás sikertelen: ' + (e.message || String(e)));
     });
