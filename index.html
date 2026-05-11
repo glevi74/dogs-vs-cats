@@ -432,7 +432,8 @@ function mpInitAbly() {
   try {
     ablyClient = new Ably.Realtime({
       key: ABLY_KEY,
-      clientId: 'p-' + Math.random().toString(36).substr(2, 8)
+      clientId: 'p-' + Math.random().toString(36).substr(2, 8),
+      echoMessages: false   // ne kapjuk vissza a saját üzeneteinket
     });
     ablyClient.connection.on('failed', () => {
       showLobbyError('❌ Kapcsolat sikertelen — ellenőrizd az API key-t!');
@@ -1106,11 +1107,15 @@ function drawParticles() {
 
 // ── Game loop ─────────────────────────────────────────────────────────────────
 function gameLoop() {
-  update();
-  drawScene();
-  for (const u of units) drawUnit(u);
-  drawParticles();
-  drawHUD();
+  try {
+    update();
+    drawScene();
+    for (const u of units) drawUnit(u);
+    drawParticles();
+    drawHUD();
+  } catch(e) {
+    console.error('Game loop hiba:', e);
+  }
   requestAnimationFrame(gameLoop);
 }
 
