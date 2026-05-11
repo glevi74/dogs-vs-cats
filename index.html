@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Kutyák vs Macskák</title>
+<script src="https://cdn.ably.com/lib/ably.min-2.js"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html, body {
@@ -25,10 +26,7 @@
     overflow:hidden;
   }
   canvas { display:block; }
-  #ui {
-    display:flex; gap:8px;
-    margin-top:7px;
-  }
+  #ui { display:flex; gap:8px; margin-top:7px; }
   .player-panel {
     flex:1; background:#1e0d40;
     border-radius:10px; padding:8px;
@@ -52,77 +50,204 @@
     padding:8px 3px; cursor:pointer;
     border:2px solid transparent;
     min-height:72px; justify-content:center;
-    transition:filter .1s;
-    -webkit-user-select:none;
+    transition:filter .1s; -webkit-user-select:none;
   }
   .unit-btn:active { filter:brightness(1.4); transform:scale(.96); }
   .p1 .unit-btn { border-color:#3b4f8a; }
   .p2 .unit-btn { border-color:#7a3f3f; }
   .unit-btn .uname { font-size:.65rem; color:#c4b5fd; white-space:nowrap; }
-  .unit-btn .ucost { font-size:.72rem; color:#fbbf24; font-weight:bold; }
-  .unit-btn .ico   { font-size:1.5rem; line-height:1.1; }
+  .unit-btn .ucost  { font-size:.72rem; color:#fbbf24; font-weight:bold; }
+  .unit-btn .ico    { font-size:1.5rem; line-height:1.1; }
+
+  /* ── Játékon belüli overlay (eredmény) ── */
   #overlay {
     display:none; position:absolute; inset:0;
     background:#000c; align-items:center;
-    justify-content:center; flex-direction:column; gap:18px;
-    font-size:2rem; font-weight:bold;
+    justify-content:center; flex-direction:column; gap:14px;
+    font-size:2rem; font-weight:bold; z-index:5;
   }
   #overlay.visible { display:flex; }
   .result { text-shadow:0 0 30px currentColor; }
-  #restart-btn {
-    font-size:1.1rem; padding:14px 36px;
-    background:#a855f7; border:none;
-    border-radius:10px; color:#fff;
-    cursor:pointer; font-weight:bold;
-    min-width:200px;
+  .overlay-btn {
+    font-size:1rem; padding:12px 28px;
+    border:none; border-radius:10px; color:#fff;
+    cursor:pointer; font-weight:bold; min-width:180px;
   }
+  #restart-btn  { background:#a855f7; }
+  #mainmenu-btn { background:#374151; font-size:.9rem; padding:10px 24px; min-width:140px; }
 
   /* ── AI mód ── */
   .header-left { display:flex; align-items:center; gap:6px; }
   .ai-toggle {
-    font-size:.68rem; padding:2px 7px;
-    border-radius:5px; cursor:pointer;
-    border:1px solid #6b21a8; background:#2d1b69;
-    color:#c084fc; font-weight:bold;
-    transition:all .15s; user-select:none;
+    font-size:.68rem; padding:2px 7px; border-radius:5px;
+    cursor:pointer; border:1px solid #6b21a8; background:#2d1b69;
+    color:#c084fc; font-weight:bold; transition:all .15s; user-select:none;
   }
-  .ai-toggle.on {
-    background:#6d28d9; border-color:#a855f7; color:#fff;
-  }
+  .ai-toggle.on { background:#6d28d9; border-color:#a855f7; color:#fff; }
   .diff-row {
-    display:flex; gap:4px;
-    overflow:hidden;
-    max-height:0; opacity:0;
-    transition:max-height .2s, opacity .2s;
+    display:flex; gap:4px; overflow:hidden;
+    max-height:0; opacity:0; transition:max-height .2s, opacity .2s;
   }
   .diff-row.visible { max-height:30px; opacity:1; }
   .diff-btn {
-    flex:1; text-align:center;
-    font-size:.62rem; padding:3px 2px;
-    border-radius:5px; cursor:pointer;
-    background:#1a0d30; border:1px solid #4a2060;
-    color:#666; user-select:none; transition:all .15s;
+    flex:1; text-align:center; font-size:.62rem; padding:3px 2px;
+    border-radius:5px; cursor:pointer; background:#1a0d30;
+    border:1px solid #4a2060; color:#666; user-select:none; transition:all .15s;
   }
   .diff-btn.easy.on   { background:#14532d; border-color:#22c55e; color:#86efac; }
   .diff-btn.medium.on { background:#78350f; border-color:#f59e0b; color:#fcd34d; }
   .diff-btn.hard.on   { background:#7f1d1d; border-color:#ef4444; color:#fca5a5; }
-  .ai-thinking {
-    font-size:.65rem; color:#a78bfa; text-align:center;
-    height:14px; letter-spacing:.05em;
-  }
+  .ai-thinking { font-size:.65rem; color:#a78bfa; text-align:center; height:14px; }
   #p2-unit-row { transition:opacity .2s; }
   #p2-unit-row.ai-on { opacity:.2; pointer-events:none; }
+  #p2-unit-row.mp-on { opacity:.2; pointer-events:none; }
+
+  /* ── Főmenü overlay ── */
+  .wp-overlay {
+    position:absolute; top:0; left:0; width:800px; height:490px;
+    display:flex; align-items:center; justify-content:center;
+    z-index:30; background:rgba(8,3,22,.96);
+    border-radius:10px 10px 0 0;
+  }
+  .menu-box {
+    display:flex; flex-direction:column;
+    align-items:center; gap:18px;
+    padding:32px 40px;
+    background:#130830; border:2px solid #6d28d9;
+    border-radius:16px; min-width:360px;
+  }
+  .menu-title {
+    font-size:1.7rem; font-weight:900;
+    color:#e9d5ff; text-align:center;
+    text-shadow:0 0 20px #a855f7;
+    line-height:1.3;
+  }
+  .menu-sub { font-size:.8rem; color:#7c6a9a; }
+  .menu-btn {
+    width:100%; padding:14px 20px;
+    font-size:1rem; font-weight:700;
+    border:none; border-radius:10px; cursor:pointer;
+    transition:filter .15s, transform .1s;
+  }
+  .menu-btn:active { filter:brightness(1.3); transform:scale(.97); }
+  .btn-local  { background:#1d4ed8; color:#fff; }
+  .btn-online { background:#7c3aed; color:#fff; }
+  .btn-back   { background:#374151; color:#9ca3af; font-size:.85rem; padding:10px; }
+  .btn-create { background:#065f46; color:#6ee7b7; }
+  .btn-join   { background:#7c3aed; color:#fff; }
+  .btn-copy   {
+    background:transparent; border:1px solid #6d28d9;
+    color:#a78bfa; font-size:.75rem; padding:6px 14px;
+    border-radius:6px; cursor:pointer; margin-top:-8px;
+  }
+
+  /* ── Lobby részletek ── */
+  .lobby-title { font-size:1.2rem; font-weight:800; color:#c4b5fd; }
+  .lobby-divider { color:#4c3870; font-size:.8rem; }
+  .join-row { display:flex; gap:8px; width:100%; }
+  #join-code {
+    flex:1; padding:10px 14px; background:#1e0d40;
+    border:2px solid #6d28d9; border-radius:8px;
+    color:#fff; font-size:1.1rem; font-weight:700;
+    text-align:center; letter-spacing:.15em; outline:none;
+    text-transform:uppercase;
+  }
+  #join-code::placeholder { color:#4c3870; letter-spacing:.05em; font-size:.9rem; }
+  .btn-join-sm {
+    padding:10px 18px; background:#7c3aed; color:#fff;
+    border:none; border-radius:8px; font-weight:700;
+    cursor:pointer; font-size:.9rem; white-space:nowrap;
+  }
+  .room-code-label { font-size:.75rem; color:#7c6a9a; }
+  .room-code-display {
+    font-size:2.8rem; font-weight:900; letter-spacing:.25em;
+    color:#e9d5ff; text-shadow:0 0 18px #a855f7;
+  }
+  .waiting-anim { font-size:.85rem; color:#a78bfa; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+  .waiting-anim span { animation:blink 1.2s infinite; }
+  .waiting-anim span:nth-child(2) { animation-delay:.2s; }
+  .waiting-anim span:nth-child(3) { animation-delay:.4s; }
+  .conn-status { font-size:.72rem; font-weight:700; padding:4px 10px; border-radius:20px; }
+  .conn-ok   { background:#14532d; color:#86efac; }
+  .conn-err  { background:#7f1d1d; color:#fca5a5; }
+  .error-msg { font-size:.75rem; color:#f87171; text-align:center; }
+
+  /* ── Visszaszámláló ── */
+  #countdown-overlay {
+    display:none; position:absolute; inset:0;
+    background:#000a; align-items:center; justify-content:center;
+    z-index:8; font-size:6rem; font-weight:900;
+    color:#e9d5ff; text-shadow:0 0 40px #a855f7;
+  }
+  #countdown-overlay.visible { display:flex; }
 </style>
 </head>
 <body>
 <div id="wrapper">
-  <div id="game-container">
-    <canvas id="canvas" width="800" height="390"></canvas>
-    <div id="overlay">
-      <div class="result" id="result-text"></div>
-      <button id="restart-btn">Újra játék</button>
+
+  <!-- ══ Főmenü overlay ══ -->
+  <div class="wp-overlay" id="main-menu">
+    <div class="menu-box">
+      <div class="menu-title">🐕 Kutyák vs Macskák 🐱</div>
+      <div class="menu-sub">Válassz játékmódot</div>
+      <button class="menu-btn btn-local"  onclick="startLocal()">🎮 Lokális játék</button>
+      <button class="menu-btn btn-online" onclick="showLobby()">🌐 Online játék</button>
     </div>
   </div>
+
+  <!-- ══ Lobby overlay ══ -->
+  <div class="wp-overlay" id="lobby" style="display:none">
+    <div class="menu-box">
+      <div class="lobby-title">🌐 Online játék</div>
+
+      <!-- Főképernyő: létrehozás / csatlakozás -->
+      <div id="lobby-main">
+        <div style="display:flex;flex-direction:column;gap:12px;width:100%">
+          <button class="menu-btn btn-create" onclick="mpCreateRoom()">➕ Szoba létrehozása</button>
+          <div class="lobby-divider" style="text-align:center">— vagy csatlakozz kóddal —</div>
+          <div class="join-row">
+            <input id="join-code" type="text" placeholder="pl. ABC123" maxlength="6" oninput="this.value=this.value.toUpperCase()">
+            <button class="btn-join-sm" onclick="mpJoinRoom()">Csatlakozás →</button>
+          </div>
+          <div id="lobby-error" class="error-msg" style="display:none"></div>
+          <button class="menu-btn btn-back" onclick="showMenu()">← Vissza</button>
+        </div>
+      </div>
+
+      <!-- Várakozó képernyő (host) -->
+      <div id="lobby-waiting" style="display:none;flex-direction:column;align-items:center;gap:14px;width:100%">
+        <div class="room-code-label">Szoba kód — küldd el az ellenfelnek!</div>
+        <div class="room-code-display" id="room-code-text">------</div>
+        <button class="btn-copy" onclick="copyRoomCode()">📋 Kód másolása</button>
+        <div class="waiting-anim">⏳ Várakozás<span>.</span><span>.</span><span>.</span></div>
+        <button class="menu-btn btn-back" style="margin-top:4px" onclick="mpDisconnect();showMenu()">← Megszakítás</button>
+      </div>
+
+      <!-- Csatlakozás folyamatban -->
+      <div id="lobby-connecting" style="display:none;flex-direction:column;align-items:center;gap:14px">
+        <div class="waiting-anim">🔄 Csatlakozás<span>.</span><span>.</span><span>.</span></div>
+        <button class="menu-btn btn-back" onclick="mpDisconnect();showLobby()">← Vissza</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ Játék ══ -->
+  <div id="game-container">
+    <canvas id="canvas" width="800" height="390"></canvas>
+
+    <!-- Visszaszámláló -->
+    <div id="countdown-overlay"><span id="countdown-num"></span></div>
+
+    <!-- Eredmény overlay -->
+    <div id="overlay">
+      <div class="result" id="result-text"></div>
+      <div id="mp-conn-row" style="display:none"></div>
+      <button class="overlay-btn" id="restart-btn">🔄 Újra játék</button>
+      <button class="overlay-btn" id="mainmenu-btn" onclick="returnToMenu()">🏠 Főmenü</button>
+    </div>
+  </div>
+
   <div id="ui">
     <!-- Player 1: Dogs -->
     <div class="player-panel p1">
@@ -130,7 +255,7 @@
         <span>🐕 1. Játékos</span>
         <span class="gold-display">🪙<span id="gold1">50</span></span>
       </div>
-      <div class="unit-row">
+      <div class="unit-row" id="p1-unit-row">
         <div class="unit-btn" ontouchstart="spawnUnit('pup',1)" onclick="spawnUnit('pup',1)">
           <span class="ico">🐾</span><span class="uname">Kölyök</span><span class="ucost">🪙20</span>
         </div>
@@ -145,16 +270,15 @@
         </div>
       </div>
     </div>
-    <!-- Player 2 / AI: Cats -->
+    <!-- Player 2 / AI / Online: Cats -->
     <div class="player-panel p2">
       <div class="panel-header">
         <div class="header-left">
-          <span>🐱 2. Játékos</span>
+          <span id="p2-label">🐱 2. Játékos</span>
           <span class="ai-toggle" id="ai-toggle" onclick="toggleAI()">🤖 AI</span>
         </div>
         <span class="gold-display">🪙<span id="gold2">50</span></span>
       </div>
-      <!-- Nehézség választó -->
       <div class="diff-row" id="diff-row">
         <div class="diff-btn easy on" id="diff-easy"   onclick="setDiff('easy')">😺 Könnyű</div>
         <div class="diff-btn medium"  id="diff-medium" onclick="setDiff('medium')">😼 Közepes</div>
@@ -177,33 +301,36 @@
       </div>
     </div>
   </div>
-</div>
+</div><!-- /wrapper -->
 
 <script>
+// ════════════════════════════════════════════════════════════════
+//  KONFIGURÁCIÓ — cseréld ki a saját Ably key-edre!
+//  ably.com → Apps → API Keys → + New Key (publish+subscribe+presence on room-*)
+// ════════════════════════════════════════════════════════════════
+const ABLY_KEY = 'YOUR_ABLY_KEY_HERE';
+
 // ── Responsive scaling ────────────────────────────────────────────────────────
 const GAME_W = 800, GAME_H = 490;
 function scaleGame() {
   const s = Math.min(window.innerWidth / GAME_W, window.innerHeight / GAME_H);
-  const wrapper = document.getElementById('wrapper');
-  wrapper.style.transform = `scale(${s})`;
-  const dx = (window.innerWidth  - GAME_W * s) / 2;
-  const dy = (window.innerHeight - GAME_H * s) / 2;
-  wrapper.style.left = dx + 'px';
-  wrapper.style.top  = dy + 'px';
+  const w = document.getElementById('wrapper');
+  w.style.transform = `scale(${s})`;
+  w.style.left = (window.innerWidth  - GAME_W * s) / 2 + 'px';
+  w.style.top  = (window.innerHeight - GAME_H * s) / 2 + 'px';
 }
 window.addEventListener('resize', scaleGame);
 scaleGame();
 
-// ── Canvas setup ──────────────────────────────────────────────────────────────
+// ── Canvas ────────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
+const ctx    = canvas.getContext('2d');
 const W = canvas.width, H = canvas.height;
-
 const LANES = [82, 158, 234, 310];
 const DOG_BASE_X = 26, CAT_BASE_X = W - 26;
-const GROUND_Y = H - 50;
+const GROUND_Y   = H - 50;
 
-// ── Game data ─────────────────────────────────────────────────────────────────
+// ── Unit definitions ──────────────────────────────────────────────────────────
 const UNIT_DEFS = {
   pup:  { team:'dog', cost:20,  hp:40,  atk:8,  spd:1.05, range:40, atkSpd:55, size:22 },
   lab:  { team:'dog', cost:40,  hp:100, atk:17, spd:0.70, range:46, atkSpd:70, size:28 },
@@ -214,7 +341,6 @@ const UNIT_DEFS = {
   lion: { team:'cat', cost:70,  hp:62,  atk:29, spd:1.30, range:50, atkSpd:44, size:25 },
   tiger:{ team:'cat', cost:120, hp:200, atk:40, spd:0.45, range:55, atkSpd:88, size:34 },
 };
-
 const CFG = {
   pup:  { bc:'#D4A574', dc:'#9A6530', sc:'#EED0A0', bw:16, bh:10, hr: 9, ll:13, lw:4, tw:4, v:'floppy'  },
   lab:  { bc:'#C8922A', dc:'#8A601A', sc:'#EAC060', bw:20, bh:12, hr:11, ll:15, lw:5, tw:5, v:'floppy'  },
@@ -226,66 +352,288 @@ const CFG = {
   tiger:{ bc:'#E07B39', dc:'#A04810', sc:'#F0A860', bw:25, bh:15, hr:14, ll:13, lw:7, tw:6, v:'tiger',stripes:true  },
 };
 
-// ── State ─────────────────────────────────────────────────────────────────────
+// ── Game state ────────────────────────────────────────────────────────────────
 let gold1=50, gold2=50, dogBaseHP=100, catBaseHP=100;
 let units=[], particles=[], gameOver=false, goldTimer=0;
+let gameStarted = false;
 
 // ── AI state ──────────────────────────────────────────────────────────────────
-let aiMode = false;
-let aiDiff = 'easy';
-let aiTimer = 0;
-let aiNextThink = 0;
-let aiThinkingDots = 0;
-let aiDotTimer = 0;
-
-// Nehézségi beállítások: [alap intervallum, jitter, spórolási küszöb]
+let aiMode=false, aiDiff='easy', aiTimer=0, aiNextThink=0, aiThinkingDots=0, aiDotTimer=0;
 const AI_CFG = {
-  easy:   { base:220, jitter:90,  saveAt:0   },
-  medium: { base:115, jitter:45,  saveAt:80  },
-  hard:   { base:55,  jitter:20,  saveAt:95  },
+  easy:   { base:220, jitter:90  },
+  medium: { base:115, jitter:45  },
+  hard:   { base:55,  jitter:20  },
 };
 
+// ── Multiplayer state ─────────────────────────────────────────────────────────
+let mpMode      = false;
+let mpRole      = null;      // 'host' | 'guest'
+let mpMyPlayer  = null;      // 1 | 2
+let mpChannel   = null;
+let mpRoomCode  = null;
+let mpConnected = false;
+let mpGameTick  = 0;
+let mpSyncTimer = 0;
+let ablyClient  = null;
+const MP_SYNC_INTERVAL = 30;
+
+// ════════════════════════════════════════════════════════════════
+//  NAVIGÁCIÓ
+// ════════════════════════════════════════════════════════════════
+function showMenu() {
+  hide('lobby'); hide('overlay');
+  show('main-menu');
+  gameStarted = false;
+}
+function showLobby() {
+  hide('main-menu');
+  show('lobby');
+  showLobbySection('lobby-main');
+  hide('lobby-error');
+  mpInitAbly();
+}
+function returnToMenu() {
+  mpDisconnect();
+  hide('overlay');
+  resetGame();
+  showMenu();
+}
+function show(id)  { document.getElementById(id).style.display = 'flex'; }
+function hide(id)  { document.getElementById(id).style.display = 'none'; }
+function showLobbySection(id) {
+  ['lobby-main','lobby-waiting','lobby-connecting'].forEach(s => {
+    document.getElementById(s).style.display = s === id ? 'flex' : 'none';
+  });
+  if (id !== 'lobby-main') document.getElementById('lobby-main').style.display = 'none';
+}
+
+function startLocal() {
+  hide('main-menu');
+  mpMode = false;
+  document.getElementById('ai-toggle').style.display = '';
+  document.getElementById('p1-unit-row').classList.remove('mp-on');
+  document.getElementById('p2-unit-row').classList.remove('mp-on');
+  document.getElementById('p2-label').textContent = '🐱 2. Játékos';
+  resetGame();
+  gameStarted = true;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  MULTIPLAYER — ABLY
+// ════════════════════════════════════════════════════════════════
+function mpInitAbly() {
+  if (ablyClient) return;
+  if (ABLY_KEY === 'YOUR_ABLY_KEY_HERE') {
+    showLobbyError('⚠ Nincs Ably API key beállítva! Szerkeszd a game.html-t.');
+    return;
+  }
+  try {
+    ablyClient = new Ably.Realtime({
+      key: ABLY_KEY,
+      clientId: 'p-' + Math.random().toString(36).substr(2, 8)
+    });
+  } catch(e) {
+    showLobbyError('Ably inicializálás sikertelen: ' + e.message);
+  }
+}
+
+function generateRoomCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return Array.from({length:6}, () => chars[Math.floor(Math.random()*chars.length)]).join('');
+}
+
+function mpCreateRoom() {
+  if (!ablyClient) { mpInitAbly(); if (!ablyClient) return; }
+  mpRoomCode  = generateRoomCode();
+  mpRole      = 'host';
+  mpMyPlayer  = 1;
+  mpChannel   = ablyClient.channels.get('room-' + mpRoomCode);
+
+  mpChannel.subscribe('game-event', mpHandleMessage);
+
+  mpChannel.presence.enter({ role: 'host' }, err => {
+    if (err) { showLobbyError('Szoba létrehozása sikertelen: ' + err.message); return; }
+    document.getElementById('room-code-text').textContent = mpRoomCode;
+    showLobbySection('lobby-waiting');
+  });
+
+  mpChannel.presence.subscribe('enter', member => {
+    if (member.data && member.data.role === 'guest') {
+      mpConnected = true;
+      mpStartOnlineGame();
+    }
+  });
+
+  mpChannel.presence.subscribe('leave', member => {
+    if (mpMode && gameStarted && member.data && member.data.role === 'guest') {
+      mpOpponentLeft();
+    }
+  });
+}
+
+function mpJoinRoom() {
+  const code = document.getElementById('join-code').value.trim().toUpperCase();
+  if (code.length !== 6) { showLobbyError('6 karakteres kód szükséges!'); return; }
+  if (!ablyClient) { mpInitAbly(); if (!ablyClient) return; }
+
+  mpRoomCode  = code;
+  mpRole      = 'guest';
+  mpMyPlayer  = 2;
+  mpChannel   = ablyClient.channels.get('room-' + mpRoomCode);
+
+  showLobbySection('lobby-connecting');
+
+  // Ellenőrzés: van-e már host a szobában?
+  mpChannel.presence.get((err, members) => {
+    if (err) { showLobbySection('lobby-main'); showLobbyError('Csatlakozás sikertelen.'); return; }
+    const host = members.find(m => m.data && m.data.role === 'host');
+    if (!host) { showLobbySection('lobby-main'); showLobbyError('Szoba nem található: ' + code); return; }
+
+    mpChannel.subscribe('game-event', mpHandleMessage);
+    mpChannel.presence.enter({ role: 'guest' }, enterErr => {
+      if (enterErr) { showLobbySection('lobby-main'); showLobbyError('Belépés sikertelen.'); return; }
+      mpConnected = true;
+      mpStartOnlineGame();
+    });
+
+    mpChannel.presence.subscribe('leave', member => {
+      if (mpMode && gameStarted && member.data && member.data.role === 'host') {
+        mpOpponentLeft();
+      }
+    });
+  });
+}
+
+function mpStartOnlineGame() {
+  hide('lobby');
+  // AI letiltása
+  if (aiMode) { aiMode = false; document.getElementById('ai-toggle').classList.remove('on'); }
+  document.getElementById('diff-row').classList.remove('visible');
+  document.getElementById('ai-toggle').style.display = 'none';
+
+  // Ellenfél gombjai letiltva
+  const myRow  = mpMyPlayer === 1 ? 'p1-unit-row' : 'p2-unit-row';
+  const oppRow = mpMyPlayer === 1 ? 'p2-unit-row' : 'p1-unit-row';
+  document.getElementById(oppRow).classList.add('mp-on');
+  document.getElementById(myRow).classList.remove('mp-on');
+
+  // Online label
+  const label = mpMyPlayer === 1 ? '🌐 1. Játékos (te)' : '🌐 1. Játékos (ellenfél)';
+  document.getElementById('p2-label').textContent =
+    mpMyPlayer === 2 ? '🌐 Macskák (te)' : '🌐 Macskák (ellenfél)';
+
+  mpMode = true;
+  resetGame();
+  startCountdown(() => { gameStarted = true; });
+}
+
+function mpDisconnect() {
+  if (mpChannel) {
+    mpChannel.presence.leave();
+    mpChannel.unsubscribe();
+    mpChannel = null;
+  }
+  mpMode = false; mpConnected = false;
+  mpRole = null; mpRoomCode = null; mpMyPlayer = null;
+  document.getElementById('ai-toggle').style.display = '';
+  document.getElementById('p1-unit-row').classList.remove('mp-on');
+  document.getElementById('p2-unit-row').classList.remove('mp-on');
+}
+
+function mpOpponentLeft() {
+  if (gameOver) return;
+  gameOver = true;
+  const winner = mpMyPlayer === 1 ? 'dog' : 'cat';
+  showGameOver(winner, true);
+}
+
+function showLobbyError(msg) {
+  const el = document.getElementById('lobby-error');
+  el.textContent = msg; el.style.display = 'block';
+  showLobbySection('lobby-main');
+}
+
+function copyRoomCode() {
+  if (mpRoomCode) navigator.clipboard.writeText(mpRoomCode).catch(()=>{});
+}
+
+// ── Multiplayer üzenetkezelő ──────────────────────────────────────────────────
+function mpHandleMessage(msg) {
+  if (!mpMode) return;
+  const d = msg.data;
+
+  if (d.type === 'SPAWN') {
+    // Ellenfél spawnolja — végrehajtjuk lokálisan
+    const cost = UNIT_DEFS[d.unitType].cost;
+    if (d.player === 1) gold1 = Math.max(0, gold1 - cost);
+    else                gold2 = Math.max(0, gold2 - cost);
+    updateGoldUI();
+    units.push(createUnit(d.unitType, d.lane));
+  }
+
+  else if (d.type === 'SYNC') {
+    // Csak a guest fogadja a host autoritatív state-jét
+    if (mpRole !== 'guest') return;
+    if (Math.abs(dogBaseHP - d.dogHP) > 4) dogBaseHP = d.dogHP;
+    if (Math.abs(catBaseHP - d.catHP) > 4) catBaseHP = d.catHP;
+    if (Math.abs(gold1     - d.g1)    > 8) { gold1 = d.g1; updateGoldUI(); }
+    if (Math.abs(gold2     - d.g2)    > 8) { gold2 = d.g2; updateGoldUI(); }
+  }
+
+  else if (d.type === 'RESTART') {
+    resetGame();
+    startCountdown(() => { gameStarted = true; });
+  }
+
+  else if (d.type === 'GAMEOVER') {
+    // Szinkronizáljuk az eredményt ha eltér
+    if (!gameOver) {
+      gameOver = true;
+      showGameOver(d.winner, false);
+    }
+  }
+}
+
+function mpSendSync() {
+  if (mpRole !== 'host' || !mpChannel) return;
+  mpChannel.publish('game-event', {
+    type:'SYNC', dogHP:dogBaseHP, catHP:catBaseHP, g1:gold1, g2:gold2
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+//  AI
+// ════════════════════════════════════════════════════════════════
 function toggleAI() {
   aiMode = !aiMode;
   document.getElementById('ai-toggle').classList.toggle('on', aiMode);
   document.getElementById('diff-row').classList.toggle('visible', aiMode);
   document.getElementById('p2-unit-row').classList.toggle('ai-on', aiMode);
   document.getElementById('ai-thinking').textContent = '';
-  aiTimer = 0;
-  aiNextThink = calcNextThink();
+  aiTimer = 0; aiNextThink = calcNextThink();
 }
-
 function setDiff(d) {
   aiDiff = d;
-  ['easy','medium','hard'].forEach(x => {
-    document.getElementById('diff-'+x).classList.toggle('on', x===d);
-  });
+  ['easy','medium','hard'].forEach(x =>
+    document.getElementById('diff-'+x).classList.toggle('on', x===d));
   aiNextThink = calcNextThink();
 }
-
 function calcNextThink() {
   const c = AI_CFG[aiDiff];
-  return c.base + Math.floor(Math.random() * c.jitter * 2) - c.jitter;
+  return c.base + Math.floor(Math.random()*c.jitter*2) - c.jitter;
 }
 
-// ── AI logika ─────────────────────────────────────────────────────────────────
 function aiThink() {
-  if (!aiMode || gameOver) return;
-
-  // Gondolkodó animáció
+  if (!aiMode || gameOver || !gameStarted) return;
   aiDotTimer++;
   if (aiDotTimer >= 18) {
-    aiDotTimer = 0;
-    aiThinkingDots = (aiThinkingDots + 1) % 4;
+    aiDotTimer = 0; aiThinkingDots = (aiThinkingDots+1)%4;
     document.getElementById('ai-thinking').textContent =
-      aiMode ? '🤖 ' + '●'.repeat(aiThinkingDots) + '○'.repeat(3-aiThinkingDots) : '';
+      '🤖 ' + '●'.repeat(aiThinkingDots) + '○'.repeat(3-aiThinkingDots);
   }
-
   aiTimer++;
   if (aiTimer < aiNextThink) return;
-  aiTimer = 0;
-  aiNextThink = calcNextThink();
-
+  aiTimer = 0; aiNextThink = calcNextThink();
   const type = aiPickUnit();
   if (type) spawnUnit(type, 2);
 }
@@ -294,107 +642,217 @@ function aiPickUnit() {
   const alive = u => u.deathTimer < 0;
   const dogs = units.filter(u => u.team==='dog' && alive(u));
   const cats = units.filter(u => u.team==='cat' && alive(u));
-  const allTypes = ['kit','tom','lion','tiger'];
-  const affordable = allTypes.filter(t => gold2 >= UNIT_DEFS[t].cost);
+  const affordable = ['kit','tom','lion','tiger'].filter(t => gold2 >= UNIT_DEFS[t].cost);
   if (!affordable.length) return null;
-
-  if (aiDiff === 'easy') return aiPickEasy(affordable);
-  if (aiDiff === 'medium') return aiPickMedium(dogs, affordable);
-  return aiPickHard(dogs, cats, affordable);
+  if (aiDiff==='easy')   return aiEasy(affordable);
+  if (aiDiff==='medium') return aiMedium(dogs, affordable);
+  return aiHard(dogs, cats, affordable);
 }
-
-// Könnyű: véletlenszerű, olcsóbbakat preferálja
-function aiPickEasy(affordable) {
-  // 70% eséllyel a legolcsóbbat küldi
-  if (Math.random() < 0.7) return affordable[0];
-  return affordable[Math.floor(Math.random() * affordable.length)];
+function aiEasy(aff)   { return Math.random()<.7 ? aff[0] : aff[Math.floor(Math.random()*aff.length)]; }
+function aiMedium(dogs, aff) {
+  if (!dogs.length) return aff.includes('tom') ? 'tom' : aff[0];
+  const tHP  = dogs.reduce((s,u)=>s+u.hp,0);
+  const avgA = dogs.reduce((s,u)=>s+u.atk,0) / dogs.length;
+  if (tHP>250 && aff.includes('tiger')) return 'tiger';
+  if (tHP>120 && aff.includes('lion'))  return 'lion';
+  if (avgA>22 && aff.includes('tiger')) return 'tiger';
+  if (avgA>14 && aff.includes('tom'))   return 'tom';
+  return aff[Math.floor(Math.random()*aff.length)];
 }
-
-// Közepes: alapvető reakció az ellenségre
-function aiPickMedium(dogs, affordable) {
-  if (!dogs.length) {
-    // Nincs ellenség → tom, ha megengedi az arány
-    return affordable.includes('tom') ? 'tom' : affordable[0];
-  }
-
-  const totalHP  = dogs.reduce((s,u) => s+u.hp, 0);
-  const totalAtk = dogs.reduce((s,u) => s+u.atk, 0);
-  const avgAtk   = totalAtk / dogs.length;
-
-  // Sok HP az ellenfélen → nagy sebzésű egység kell
-  if (totalHP > 250 && affordable.includes('tiger')) return 'tiger';
-  if (totalHP > 120 && affordable.includes('lion'))  return 'lion';
-  // Erős sebesítők → kemény unit kell
-  if (avgAtk > 22   && affordable.includes('tiger')) return 'tiger';
-  if (avgAtk > 14   && affordable.includes('tom'))   return 'tom';
-
-  // Random a megfizethetők közül
-  return affordable[Math.floor(Math.random() * affordable.length)];
-}
-
-// Nehéz: lane-elemzés, counter-stratégia, arany-menedzsment
-function aiPickHard(dogs, cats, affordable) {
-  const alive = u => u.deathTimer < 0;
-
-  // Alap védelmi helyzet
-  if (catBaseHP < 35) {
-    // Kritikus: mindent bevetünk
-    return affordable[affordable.length - 1];
-  }
-
-  // Arany spórolás tigrisre, ha közel vagyunk
-  const c = AI_CFG['hard'];
-  if (!affordable.includes('tiger') && gold2 >= c.saveAt) {
-    return null; // várunk a tigrisre
-  }
-
-  if (!dogs.length) {
-    // Senki nincs → nyomás alá helyezzük az ellenfelet
-    if (affordable.includes('lion'))  return 'lion';  // gyors push
-    if (affordable.includes('tom'))   return 'tom';
-    return affordable[0];
-  }
-
-  // Ellenség összetételének elemzése
-  const count = {};
-  for (const u of dogs) count[u.type] = (count[u.type]||0) + 1;
-
-  // Lane-fenyegetés: melyik sávban van a legtöbb ellenség?
-  const laneThreat = [0,0,0,0];
-  for (const u of dogs) laneThreat[u.lane] += u.hp * 0.01 + u.atk * 0.05;
-  const maxThreatLane = laneThreat.indexOf(Math.max(...laneThreat));
-
-  // Konkrét counter-döntések
-  // Medvék → oroszlánok (gyorsak, átmegyenek mellettük)
-  if ((count.bear||0) >= 1 && affordable.includes('lion')) return 'lion';
-
-  // Farkas hullám → tigris (magas HP elnyeli a sebzést)
-  if ((count.wolf||0) >= 2 && affordable.includes('tiger')) return 'tiger';
-
-  // Kölyök spam → tom (hatékonyan kezeli a sok gyenge egységet)
-  if ((count.pup||0) >= 3 && affordable.includes('tom')) return 'tom';
-
-  // Labrador vonalak → oroszlán (gyors, bázist célozza)
-  if ((count.lab||0) >= 2 && affordable.includes('lion')) return 'lion';
-
-  // Ha a saját sávjaink üresen állnak, de az ellenség nyom
-  const myLanes = [0,0,0,0];
+function aiHard(dogs, cats, aff) {
+  if (catBaseHP<35) return aff[aff.length-1];
+  if (!aff.includes('tiger') && gold2>=95) return null;
+  if (!dogs.length) return aff.includes('lion') ? 'lion' : aff.includes('tom') ? 'tom' : aff[0];
+  const cnt = {};
+  for (const u of dogs) cnt[u.type]=(cnt[u.type]||0)+1;
+  const myLanes=[0,0,0,0];
   for (const u of cats) myLanes[u.lane]++;
-  const emptyThreatened = myLanes[maxThreatLane] === 0;
-  if (emptyThreatened) {
-    // Sürgősen küldünk valamit a fenyegetett sávba
-    return affordable.includes('tom') ? 'tom' :
-           affordable.includes('kit') ? 'kit' : affordable[0];
-  }
-
-  // Alapértelmezett: legjobb amit megengedhetünk
-  if (affordable.includes('tiger')) return 'tiger';
-  if (affordable.includes('lion'))  return 'lion';
-  if (affordable.includes('tom'))   return 'tom';
-  return 'kit';
+  const laneThreat=[0,0,0,0];
+  for (const u of dogs) laneThreat[u.lane]+=u.hp*.01+u.atk*.05;
+  const maxTL = laneThreat.indexOf(Math.max(...laneThreat));
+  if ((cnt.bear||0)>=1 && aff.includes('lion'))  return 'lion';
+  if ((cnt.wolf||0)>=2 && aff.includes('tiger')) return 'tiger';
+  if ((cnt.pup||0)>=3  && aff.includes('tom'))   return 'tom';
+  if ((cnt.lab||0)>=2  && aff.includes('lion'))  return 'lion';
+  if (myLanes[maxTL]===0) return aff.includes('tom') ? 'tom' : aff[0];
+  return aff.includes('tiger')?'tiger': aff.includes('lion')?'lion': aff.includes('tom')?'tom':'kit';
 }
 
-// ── Particles ─────────────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+//  GAME LOGIC
+// ════════════════════════════════════════════════════════════════
+function createUnit(type, lane) {
+  const d = UNIT_DEFS[type];
+  const isDog = d.team==='dog';
+  return {
+    type, team:d.team,
+    x: isDog ? DOG_BASE_X+44 : CAT_BASE_X-44,
+    y: LANES[lane], lane,
+    hp:d.hp, maxHp:d.hp, atk:d.atk,
+    spd: isDog ? d.spd : -d.spd,
+    range:d.range, atkSpd:d.atkSpd,
+    atkTimer:0, size:d.size,
+    state:'walk', shakeTimer:0, deathTimer:-1,
+    animPhase: Math.random()*Math.PI*2,
+  };
+}
+
+function pickLane(team) {
+  const c=[0,0,0,0];
+  for (const u of units) if (u.team===team) c[u.lane]++;
+  return c.indexOf(Math.min(...c));
+}
+
+function spawnUnit(type, player) {
+  if (!gameStarted || gameOver) return;
+  // Online módban csak a saját játékost irányíthatjuk
+  if (mpMode && player !== mpMyPlayer) return;
+  const cost = UNIT_DEFS[type].cost;
+  if (player===1 && gold1<cost) return;
+  if (player===2 && gold2<cost) return;
+  if (player===1) gold1-=cost; else gold2-=cost;
+  updateGoldUI();
+  const lane = pickLane(UNIT_DEFS[type].team);
+  units.push(createUnit(type, lane));
+  // Broadcast az ellenfelnek
+  if (mpMode && mpChannel) {
+    mpChannel.publish('game-event', { type:'SPAWN', unitType:type, lane, player, tick:mpGameTick });
+  }
+}
+
+function updateGoldUI() {
+  document.getElementById('gold1').textContent = gold1;
+  document.getElementById('gold2').textContent = gold2;
+}
+
+function resetGame() {
+  gold1=50; gold2=50; dogBaseHP=100; catBaseHP=100;
+  units=[]; particles=[]; gameOver=false; goldTimer=0;
+  mpGameTick=0; mpSyncTimer=0;
+  aiTimer=0; aiNextThink=calcNextThink(); aiThinkingDots=0; aiDotTimer=0;
+  document.getElementById('ai-thinking').textContent='';
+  document.getElementById('overlay').classList.remove('visible');
+  updateGoldUI();
+}
+
+function findEnemy(u) {
+  let best=null, bestDist=Infinity;
+  for (const o of units) {
+    if (o.team===u.team||o.deathTimer>=0||o.lane!==u.lane) continue;
+    const dx=o.x-u.x;
+    if (u.team==='dog'?dx<=0:dx>=0) continue;
+    const d=Math.abs(dx);
+    if (d<bestDist){bestDist=d;best=o;}
+  }
+  return {enemy:best, dist:bestDist};
+}
+
+function update() {
+  if (!gameStarted || gameOver) return;
+  goldTimer++;
+  if (goldTimer>=90){ gold1+=8; gold2+=8; updateGoldUI(); goldTimer=0; }
+
+  if (!mpMode) aiThink();
+
+  if (mpMode) {
+    mpGameTick++;
+    mpSyncTimer++;
+    if (mpSyncTimer >= MP_SYNC_INTERVAL) { mpSyncTimer=0; mpSendSync(); }
+  }
+
+  for (const u of units) {
+    if (u.deathTimer>=0){u.deathTimer++;continue;}
+    if (u.shakeTimer>0) u.shakeTimer--;
+    const {enemy,dist} = findEnemy(u);
+    const baseX    = u.team==='dog' ? CAT_BASE_X : DOG_BASE_X;
+    const baseDist = Math.abs(baseX - u.x);
+
+    if (enemy && dist<=u.range) {
+      u.state='attack'; u.atkTimer++;
+      if (u.atkTimer>=u.atkSpd) {
+        u.atkTimer=0; enemy.hp-=u.atk; enemy.shakeTimer=8;
+        addHitParticles(enemy.x,enemy.y, u.team==='dog'?'#60a5fa99':'#f8717199');
+        if (enemy.hp<=0) {
+          addDeathParticles(enemy.x,enemy.y); enemy.deathTimer=0;
+          const reward = 10+Math.floor(UNIT_DEFS[enemy.type].cost*.4);
+          if (u.team==='dog') gold1+=reward; else gold2+=reward;
+          updateGoldUI();
+        }
+      }
+    } else if (!enemy && baseDist<=u.range+20) {
+      u.state='attack'; u.atkTimer++;
+      if (u.atkTimer>=u.atkSpd) {
+        u.atkTimer=0;
+        if (u.team==='dog'){catBaseHP-=u.atk;addHitParticles(CAT_BASE_X,H/2-20,'#f8717199');}
+        else               {dogBaseHP-=u.atk;addHitParticles(DOG_BASE_X,H/2-20,'#60a5fa99');}
+      }
+    } else {
+      u.state='walk'; u.atkTimer=0; u.x+=u.spd;
+    }
+    u.animPhase += u.state==='walk' ? Math.abs(u.spd)*.22 : .045;
+  }
+
+  units     = units.filter(u=>u.deathTimer<28);
+  particles = particles.filter(p=>p.life>0);
+  for (const p of particles){p.x+=p.vx;p.y+=p.vy;p.vy+=.12;p.life-=.03;}
+
+  dogBaseHP=Math.max(0,dogBaseHP); catBaseHP=Math.max(0,catBaseHP);
+  if (catBaseHP<=0) { gameOver=true; showGameOver('dog'); }
+  if (dogBaseHP<=0) { gameOver=true; showGameOver('cat'); }
+}
+
+function showGameOver(winner, opponentLeft=false) {
+  gameOver=true;
+  const rt=document.getElementById('result-text');
+  const connRow=document.getElementById('mp-conn-row');
+  document.getElementById('overlay').classList.add('visible');
+  document.getElementById('ai-thinking').textContent='';
+  if (winner==='dog'){rt.textContent='🐕 A kutyák nyertek! 🎉';rt.style.color='#60a5fa';}
+  else               {rt.textContent='🐱 A macskák nyertek! 😼';rt.style.color='#f87171';}
+  if (opponentLeft) { connRow.style.display='block'; connRow.textContent='⚠ Az ellenfél kilépett.'; connRow.style.color='#fbbf24'; }
+  else connRow.style.display='none';
+  // Broadcast online módban
+  if (mpMode && mpChannel && !opponentLeft) {
+    mpChannel.publish('game-event', { type:'GAMEOVER', winner });
+  }
+}
+
+// ── Visszaszámláló ────────────────────────────────────────────────────────────
+function startCountdown(callback) {
+  const el  = document.getElementById('countdown-overlay');
+  const num = document.getElementById('countdown-num');
+  el.classList.add('visible');
+  let n = 3;
+  num.textContent = n;
+  const iv = setInterval(() => {
+    n--;
+    if (n <= 0) {
+      clearInterval(iv);
+      el.classList.remove('visible');
+      callback();
+    } else {
+      num.textContent = n;
+    }
+  }, 1000);
+}
+
+// ── Restart ───────────────────────────────────────────────────────────────────
+document.getElementById('restart-btn').addEventListener('click', () => {
+  if (mpMode && mpChannel) {
+    mpChannel.publish('game-event', { type:'RESTART' });
+  }
+  resetGame();
+  if (gameStarted === false) gameStarted = true; // local: már elindult
+  if (mpMode) {
+    startCountdown(() => { gameStarted = true; });
+  } else {
+    gameStarted = true;
+  }
+});
+
+// ════════════════════════════════════════════════════════════════
+//  PARTICLES
+// ════════════════════════════════════════════════════════════════
 function addHitParticles(x,y,color) {
   for (let i=0;i<7;i++) {
     const a=Math.random()*Math.PI*2, s=1.5+Math.random()*2.5;
@@ -408,37 +866,32 @@ function addDeathParticles(x,y) {
   }
 }
 
-// ── Drawing helpers ───────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+//  RENDERING
+// ════════════════════════════════════════════════════════════════
 function drawHPBar(x,y,w,h,hp,maxHp,color) {
   const pct=Math.max(0,hp/maxHp);
   ctx.fillStyle='#111'; ctx.fillRect(x,y,w,h);
   ctx.fillStyle=color;  ctx.fillRect(x,y,w*pct,h);
   ctx.strokeStyle='rgba(255,255,255,.2)'; ctx.lineWidth=1; ctx.strokeRect(x,y,w,h);
 }
-
 function drawLeg(x,y,angleDeg,len,w,color) {
-  ctx.save();
-  ctx.translate(x,y); ctx.rotate(angleDeg*Math.PI/180);
+  ctx.save(); ctx.translate(x,y); ctx.rotate(angleDeg*Math.PI/180);
   ctx.fillStyle=color;
   ctx.beginPath(); ctx.roundRect(-w/2,0,w,len,w/2); ctx.fill();
   ctx.beginPath(); ctx.ellipse(0,len+1,w*.75,w*.45,0,0,Math.PI*2); ctx.fill();
   ctx.restore();
 }
 
-// ── Dog renderer ──────────────────────────────────────────────────────────────
 function drawDog(cfg,t,walking,mouthOpen,lunge) {
   const bob=Math.sin(t*7)*(walking?2.5:.6);
   const ls =Math.sin(t*7)*(walking?30:6);
   const {bw,bh,hr,ll,lw,tw,bc,dc,sc,v}=cfg;
-
   drawLeg(bw*.45+lunge,bh+bob, ls-6,ll,lw,dc);
   drawLeg(-bw*.5+lunge,bh+bob,-ls-6,ll,lw,dc);
-
-  ctx.fillStyle=bc;
-  ctx.beginPath(); ctx.ellipse(lunge,bob,bw,bh,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=bc; ctx.beginPath(); ctx.ellipse(lunge,bob,bw,bh,0,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='rgba(255,255,255,.07)';
   ctx.beginPath(); ctx.ellipse(lunge,bob-2,bw*.65,bh*.55,0,0,Math.PI*2); ctx.fill();
-
   const wag=Math.sin(t*5.5)*(walking?18:8);
   ctx.strokeStyle=bc; ctx.lineWidth=tw; ctx.lineCap='round';
   ctx.beginPath(); ctx.moveTo(-bw+lunge,bob);
@@ -446,11 +899,9 @@ function drawDog(cfg,t,walking,mouthOpen,lunge) {
   else if (v==='bear') ctx.lineTo(-bw-9+lunge,bob-3+wag*.15);
   else ctx.quadraticCurveTo(-bw-14+lunge,-10+wag,-bw-7+lunge,-24+wag*1.5);
   ctx.stroke();
-
   const hx=bw+5+lunge, hy=-bh+1+bob;
   ctx.save(); ctx.translate(hx,hy);
   ctx.fillStyle=bc; ctx.beginPath(); ctx.arc(0,0,hr,0,Math.PI*2); ctx.fill();
-
   ctx.fillStyle=dc;
   if (v==='floppy') {
     ctx.beginPath(); ctx.ellipse(-hr*.42,hr*.55,hr*.36,hr*.68,-0.25,0,Math.PI*2); ctx.fill();
@@ -462,20 +913,15 @@ function drawDog(cfg,t,walking,mouthOpen,lunge) {
     ctx.beginPath(); ctx.moveTo(-hr*.46,-hr*.45); ctx.lineTo(-hr*.22,-hr*1.3); ctx.lineTo(hr*.08,-hr*.55); ctx.closePath(); ctx.fill();
   } else {
     ctx.beginPath(); ctx.arc(-hr*.5,-hr*.72,hr*.42,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc( hr*.14,-hr*.8, hr*.42,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc( hr*.14,-hr*.8,hr*.42,0,Math.PI*2); ctx.fill();
     ctx.fillStyle='#aa6644';
     ctx.beginPath(); ctx.arc(-hr*.5,-hr*.72,hr*.24,0,Math.PI*2); ctx.fill();
-    ctx.beginPath(); ctx.arc( hr*.14,-hr*.8, hr*.24,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc( hr*.14,-hr*.8,hr*.24,0,Math.PI*2); ctx.fill();
   }
-
-  ctx.fillStyle=sc;
-  ctx.beginPath(); ctx.ellipse(hr*.78,hr*.24,hr*.50,hr*.36,0,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='#111';
-  ctx.beginPath(); ctx.ellipse(hr*1.2,hr*.1,hr*.2,hr*.16,0,0,Math.PI*2); ctx.fill();
-
+  ctx.fillStyle=sc; ctx.beginPath(); ctx.ellipse(hr*.78,hr*.24,hr*.50,hr*.36,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#111'; ctx.beginPath(); ctx.ellipse(hr*1.2,hr*.1,hr*.2,hr*.16,0,0,Math.PI*2); ctx.fill();
   if (mouthOpen) {
-    ctx.fillStyle='#cc2222';
-    ctx.beginPath(); ctx.ellipse(hr*.88,hr*.52,hr*.3,hr*.2,0,0,Math.PI); ctx.fill();
+    ctx.fillStyle='#cc2222'; ctx.beginPath(); ctx.ellipse(hr*.88,hr*.52,hr*.3,hr*.2,0,0,Math.PI); ctx.fill();
     ctx.fillStyle='white';
     for (const tx of [hr*.68,hr*.86,hr*1.04]) {
       ctx.beginPath(); ctx.moveTo(tx,hr*.48); ctx.lineTo(tx+hr*.08,hr*.64); ctx.lineTo(tx+hr*.16,hr*.48); ctx.closePath(); ctx.fill();
@@ -484,27 +930,21 @@ function drawDog(cfg,t,walking,mouthOpen,lunge) {
     ctx.strokeStyle='#555'; ctx.lineWidth=1.2;
     ctx.beginPath(); ctx.moveTo(hr*.7,hr*.44); ctx.quadraticCurveTo(hr*.9,hr*.60,hr*1.14,hr*.44); ctx.stroke();
   }
-
   ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(hr*.14,-hr*.22,hr*.22,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='rgba(255,255,255,.85)'; ctx.beginPath(); ctx.arc(hr*.23,-hr*.3,hr*.1,0,Math.PI*2); ctx.fill();
   ctx.restore();
-
   drawLeg( bw*.45+lunge,bh+bob,-ls+6,ll,lw,bc);
   drawLeg(-bw*.5+lunge, bh+bob, ls+6,ll,lw,bc);
 }
 
-// ── Cat renderer ──────────────────────────────────────────────────────────────
 function drawCat(cfg,t,walking,mouthOpen,lunge) {
   const bob=Math.sin(t*7)*(walking?2.2:.6);
   const ls =Math.sin(t*7)*(walking?28:5);
   const {bw,bh,hr,ll,lw,bc,dc,sc,v,stripes}=cfg;
   const tw_=cfg.tw;
-
   drawLeg( bw*.45+lunge,bh+bob, ls-5,ll,lw,dc);
   drawLeg(-bw*.50+lunge,bh+bob,-ls-5,ll,lw,dc);
-
   ctx.fillStyle=bc; ctx.beginPath(); ctx.ellipse(lunge,bob,bw,bh,0,0,Math.PI*2); ctx.fill();
-
   if (stripes) {
     ctx.strokeStyle=dc; ctx.lineWidth=v==='tiger'?4:2.5; ctx.lineCap='round';
     for (let i=-1;i<=1;i++) {
@@ -513,39 +953,31 @@ function drawCat(cfg,t,walking,mouthOpen,lunge) {
   }
   ctx.fillStyle='rgba(255,255,255,.07)';
   ctx.beginPath(); ctx.ellipse(lunge,bob-2,bw*.6,bh*.5,0,0,Math.PI*2); ctx.fill();
-
   const wag=Math.sin(t*5)*(walking?14:6);
   ctx.strokeStyle=bc; ctx.lineWidth=tw_; ctx.lineCap='round';
   ctx.beginPath(); ctx.moveTo(-bw+lunge,bob);
   ctx.bezierCurveTo(-bw-10+lunge,-18+wag,-bw+8+lunge,-34+wag,-bw+18+lunge,-28+wag*.5);
   ctx.stroke();
   ctx.fillStyle=dc; ctx.beginPath(); ctx.arc(-bw+18+lunge,-28+wag*.5,tw_*1.1,0,Math.PI*2); ctx.fill();
-
   const hx=bw+4+lunge, hy=-bh+1+bob;
   ctx.save(); ctx.translate(hx,hy);
-  if (v==='lion') {
-    ctx.fillStyle='#7B3A0A'; ctx.beginPath(); ctx.arc(0,0,hr*1.45,0,Math.PI*2); ctx.fill();
-  }
+  if (v==='lion') { ctx.fillStyle='#7B3A0A'; ctx.beginPath(); ctx.arc(0,0,hr*1.45,0,Math.PI*2); ctx.fill(); }
   ctx.fillStyle=bc; ctx.beginPath(); ctx.arc(0,0,hr,0,Math.PI*2); ctx.fill();
-
   if (stripes) {
     ctx.strokeStyle=dc; ctx.lineWidth=1.5; ctx.lineCap='round';
     for (let i=-1;i<=1;i++) {
       ctx.beginPath(); ctx.moveTo(i*hr*.3,-hr*.9); ctx.lineTo(i*hr*.18,-hr*.3); ctx.stroke();
     }
   }
-
   ctx.fillStyle=dc;
   ctx.beginPath(); ctx.moveTo(-hr*.55,-hr*.38); ctx.lineTo(-hr*.28,-hr*1.52); ctx.lineTo(hr*.08,-hr*.5); ctx.closePath(); ctx.fill();
   ctx.beginPath(); ctx.moveTo(hr*.06,-hr*.52); ctx.lineTo(hr*.38,-hr*1.52); ctx.lineTo(hr*.68,-hr*.38); ctx.closePath(); ctx.fill();
   ctx.fillStyle='#e899aa';
   ctx.beginPath(); ctx.moveTo(-hr*.5,-hr*.45); ctx.lineTo(-hr*.28,-hr*1.28); ctx.lineTo(hr*.04,-hr*.56); ctx.closePath(); ctx.fill();
   ctx.beginPath(); ctx.moveTo(hr*.1,-hr*.58); ctx.lineTo(hr*.36,-hr*1.28); ctx.lineTo(hr*.62,-hr*.44); ctx.closePath(); ctx.fill();
-
   ctx.fillStyle=sc; ctx.beginPath(); ctx.arc(hr*.52,hr*.22,hr*.44,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='#dd6699';
   ctx.beginPath(); ctx.moveTo(hr*.85,hr*.08); ctx.lineTo(hr*.65,hr*.28); ctx.lineTo(hr*1.05,hr*.28); ctx.closePath(); ctx.fill();
-
   if (mouthOpen) {
     ctx.fillStyle='#cc2222'; ctx.beginPath(); ctx.ellipse(hr*.85,hr*.5,hr*.28,hr*.18,0,0,Math.PI); ctx.fill();
     ctx.fillStyle='white';
@@ -556,24 +988,20 @@ function drawCat(cfg,t,walking,mouthOpen,lunge) {
     ctx.beginPath(); ctx.moveTo(hr*.85,hr*.3); ctx.quadraticCurveTo(hr*.68,hr*.52,hr*.5,hr*.48); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(hr*.85,hr*.3); ctx.quadraticCurveTo(hr*1.02,hr*.52,hr*1.22,hr*.48); ctx.stroke();
   }
-
   ctx.strokeStyle='rgba(255,255,255,.65)'; ctx.lineWidth=.9;
   for (let i=0;i<3;i++) {
     const wy=hr*(.06+i*.12);
     ctx.beginPath(); ctx.moveTo(hr*.38,wy); ctx.lineTo(hr*1.85,wy-3+i*2.5); ctx.stroke();
   }
-
   ctx.fillStyle='#224411'; ctx.beginPath(); ctx.arc(hr*.14,-hr*.22,hr*.22,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='#55cc33'; ctx.beginPath(); ctx.arc(hr*.14,-hr*.22,hr*.17,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='#111';   ctx.beginPath(); ctx.ellipse(hr*.14,-hr*.22,hr*.055,hr*.155,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='#111';    ctx.beginPath(); ctx.ellipse(hr*.14,-hr*.22,hr*.055,hr*.155,0,0,Math.PI*2); ctx.fill();
   ctx.fillStyle='rgba(255,255,255,.8)'; ctx.beginPath(); ctx.arc(hr*.2,-hr*.3,hr*.07,0,Math.PI*2); ctx.fill();
-
   ctx.restore();
   drawLeg( bw*.45+lunge,bh+bob,-ls+5,ll,lw,bc);
   drawLeg(-bw*.50+lunge,bh+bob, ls+5,ll,lw,bc);
 }
 
-// ── Unit draw ─────────────────────────────────────────────────────────────────
 function drawUnit(u) {
   if (u.deathTimer>=0) return;
   const cfg=CFG[u.type], s=u.size/28;
@@ -582,48 +1010,38 @@ function drawUnit(u) {
   const lunge=Math.sin(atkProg*Math.PI)*6;
   const mouthOpen=u.state==='attack'&&atkProg>.28&&atkProg<.78;
   const walking=u.state==='walk';
-
   ctx.save();
-  ctx.translate(u.x+shake,u.y+shake);
+  ctx.translate(u.x+shake, u.y+shake);
   if (u.team==='cat') ctx.scale(-1,1);
   ctx.scale(s,s);
   if (u.team==='dog') drawDog(cfg,u.animPhase,walking,mouthOpen,lunge);
   else                drawCat(cfg,u.animPhase,walking,mouthOpen,lunge);
   ctx.restore();
-
   const bw2=u.size*1.8;
-  drawHPBar(u.x+shake-bw2/2,u.y+shake-u.size*.72-13,bw2,5,u.hp,u.maxHp,
+  drawHPBar(u.x+shake-bw2/2, u.y+shake-u.size*.72-13, bw2, 5, u.hp, u.maxHp,
     u.team==='dog'?'#60a5fa':'#f87171');
 }
 
-// ── Scene ─────────────────────────────────────────────────────────────────────
 function drawScene() {
   const sky=ctx.createLinearGradient(0,0,0,H);
   sky.addColorStop(0,'#0f0528'); sky.addColorStop(1,'#1e0a3c');
   ctx.fillStyle=sky; ctx.fillRect(0,0,W,H);
-
   ctx.fillStyle='rgba(255,255,255,.5)';
-  for (const s of [37,73,109,151,197,241,277,313,349,383,419,457,491]) {
-    ctx.beginPath(); ctx.arc((s*53)%W,(s*37)%80+5,.8,0,Math.PI*2); ctx.fill();
-  }
-
+  for (const s of [37,73,109,151,197,241,277,313,349,383,419,457,491])
+    { ctx.beginPath(); ctx.arc((s*53)%W,(s*37)%80+5,.8,0,Math.PI*2); ctx.fill(); }
   ctx.fillStyle='#2d4a1e'; ctx.fillRect(0,GROUND_Y,W,H-GROUND_Y);
   ctx.fillStyle='#3d6a2e'; ctx.fillRect(0,GROUND_Y,W,8);
-
   ctx.setLineDash([10,20]); ctx.lineWidth=1;
   for (const ly of LANES) {
     ctx.strokeStyle='rgba(255,255,255,.05)';
     ctx.beginPath(); ctx.moveTo(0,ly+22); ctx.lineTo(W,ly+22); ctx.stroke();
   }
   ctx.setLineDash([]);
-  ctx.strokeStyle='rgba(168,85,247,.2)'; ctx.lineWidth=2;
-  ctx.setLineDash([6,12]);
+  ctx.strokeStyle='rgba(168,85,247,.2)'; ctx.lineWidth=2; ctx.setLineDash([6,12]);
   ctx.beginPath(); ctx.moveTo(W/2,30); ctx.lineTo(W/2,GROUND_Y); ctx.stroke();
   ctx.setLineDash([]);
-
-  drawBase(DOG_BASE_X,dogBaseHP,'#60a5fa','🏠');
-  drawBase(CAT_BASE_X,catBaseHP,'#f87171','🏰');
-
+  drawBase(DOG_BASE_X, dogBaseHP, '#60a5fa', '🏠');
+  drawBase(CAT_BASE_X, catBaseHP, '#f87171', '🏰');
   for (const u of units) {
     if (u.deathTimer>=0) continue;
     ctx.fillStyle='rgba(0,0,0,.25)';
@@ -644,10 +1062,17 @@ function drawBase(bx,hp,color,emoji) {
 function drawHUD() {
   ctx.fillStyle='rgba(0,0,0,.5)'; ctx.fillRect(0,0,W,30);
   ctx.font='bold 12px Segoe UI'; ctx.textBaseline='middle';
-  ctx.textAlign='left';  ctx.fillStyle='#93c5fd'; ctx.fillText(`🏠 Kutyák  🪙${gold1}`,8,15);
-  ctx.textAlign='right';
-  const p2label = aiMode ? `🤖 AI (${aiDiff==='easy'?'😺':aiDiff==='medium'?'😼':'😾'})` : '2. Játékos';
-  ctx.fillStyle='#fca5a5'; ctx.fillText(`🪙${gold2}  ${p2label} 🏰`,W-8,15);
+  ctx.textAlign='left';  ctx.fillStyle='#93c5fd';
+  ctx.fillText(`🏠 Kutyák  🪙${gold1}`, 8, 15);
+  ctx.textAlign='right'; ctx.fillStyle='#fca5a5';
+  const p2lbl = mpMode
+    ? (mpConnected ? `🟢 Online  🪙${gold2}  Macskák 🏰` : `🔴 Kapcsolódás...`)
+    : (aiMode ? `🤖 AI (${aiDiff==='easy'?'😺':aiDiff==='medium'?'😼':'😾'})  🪙${gold2}  Macskák 🏰` : `🪙${gold2}  Macskák 🏰`);
+  ctx.fillText(p2lbl, W-8, 15);
+  if (mpMode && mpRoomCode) {
+    ctx.textAlign='center'; ctx.fillStyle='rgba(168,85,247,.7)'; ctx.font='10px Segoe UI';
+    ctx.fillText(`🌐 ${mpRoomCode}`, W/2, 15);
+  }
 }
 
 function drawParticles() {
@@ -658,148 +1083,35 @@ function drawParticles() {
   ctx.globalAlpha=1;
 }
 
-// ── Logic ─────────────────────────────────────────────────────────────────────
-function createUnit(type, lane) {
-  const d = UNIT_DEFS[type];
-  const isDog = d.team==='dog';
-  return {
-    type, team:d.team,
-    x: isDog ? DOG_BASE_X+44 : CAT_BASE_X-44,
-    y: LANES[lane],
-    lane,
-    hp:d.hp, maxHp:d.hp, atk:d.atk,
-    spd: isDog ? d.spd : -d.spd,
-    range:d.range, atkSpd:d.atkSpd,
-    atkTimer:0, size:d.size,
-    state:'walk', shakeTimer:0, deathTimer:-1,
-    animPhase: Math.random()*Math.PI*2,
-  };
+// ── Game loop ─────────────────────────────────────────────────────────────────
+function gameLoop() {
+  update();
+  drawScene();
+  for (const u of units) drawUnit(u);
+  drawParticles();
+  drawHUD();
+  requestAnimationFrame(gameLoop);
 }
 
-function pickLane(team) {
-  const c=[0,0,0,0];
-  for (const u of units) if (u.team===team) c[u.lane]++;
-  return c.indexOf(Math.min(...c));
-}
-
-function spawnUnit(type, player) {
-  if (gameOver) return;
-  const cost=UNIT_DEFS[type].cost;
-  if (player===1 && gold1<cost) return;
-  if (player===2 && gold2<cost) return;
-  if (player===1) gold1-=cost; else gold2-=cost;
-  updateGoldUI();
-  units.push(createUnit(type, pickLane(UNIT_DEFS[type].team)));
-}
-
-function updateGoldUI() {
-  document.getElementById('gold1').textContent=gold1;
-  document.getElementById('gold2').textContent=gold2;
-}
-
-function findEnemy(u) {
-  let best=null,bestDist=Infinity;
-  for (const o of units) {
-    if (o.team===u.team||o.deathTimer>=0||o.lane!==u.lane) continue;
-    const dx=o.x-u.x;
-    if (u.team==='dog'?dx<=0:dx>=0) continue;
-    const d=Math.abs(dx);
-    if (d<bestDist){bestDist=d;best=o;}
-  }
-  return {enemy:best,dist:bestDist};
-}
-
-function update() {
-  if (gameOver) return;
-  goldTimer++;
-  if (goldTimer>=90){gold1+=8;gold2+=8;updateGoldUI();goldTimer=0;}
-
-  // AI gondolkodik
-  aiThink();
-
-  for (const u of units) {
-    if (u.deathTimer>=0){u.deathTimer++;continue;}
-    if (u.shakeTimer>0) u.shakeTimer--;
-    const {enemy,dist}=findEnemy(u);
-    const baseX=u.team==='dog'?CAT_BASE_X:DOG_BASE_X;
-    const baseDist=Math.abs(baseX-u.x);
-
-    if (enemy&&dist<=u.range) {
-      u.state='attack'; u.atkTimer++;
-      if (u.atkTimer>=u.atkSpd) {
-        u.atkTimer=0; enemy.hp-=u.atk; enemy.shakeTimer=8;
-        addHitParticles(enemy.x,enemy.y,u.team==='dog'?'#60a5fa99':'#f8717199');
-        if (enemy.hp<=0) {
-          addDeathParticles(enemy.x,enemy.y); enemy.deathTimer=0;
-          const reward=10+Math.floor(UNIT_DEFS[enemy.type].cost*.4);
-          if (u.team==='dog') gold1+=reward; else gold2+=reward;
-          updateGoldUI();
-        }
-      }
-    } else if (!enemy&&baseDist<=u.range+20) {
-      u.state='attack'; u.atkTimer++;
-      if (u.atkTimer>=u.atkSpd) {
-        u.atkTimer=0;
-        if (u.team==='dog'){catBaseHP-=u.atk;addHitParticles(CAT_BASE_X,H/2-20,'#f8717199');}
-        else{dogBaseHP-=u.atk;addHitParticles(DOG_BASE_X,H/2-20,'#60a5fa99');}
-      }
-    } else {
-      u.state='walk'; u.atkTimer=0; u.x+=u.spd;
-    }
-    u.animPhase+=u.state==='walk'?Math.abs(u.spd)*.22:.045;
-  }
-
-  units=units.filter(u=>u.deathTimer<28);
-  for (const p of particles){p.x+=p.vx;p.y+=p.vy;p.vy+=.12;p.life-=.03;}
-  particles=particles.filter(p=>p.life>0);
-
-  dogBaseHP=Math.max(0,dogBaseHP); catBaseHP=Math.max(0,catBaseHP);
-  if (catBaseHP<=0) endGame('dog');
-  if (dogBaseHP<=0) endGame('cat');
-}
-
-function endGame(winner) {
-  gameOver=true;
-  const rt=document.getElementById('result-text');
-  document.getElementById('overlay').classList.add('visible');
-  document.getElementById('ai-thinking').textContent='';
-  if (winner==='dog'){rt.textContent='🐕 A kutyák nyertek! 🎉';rt.style.color='#60a5fa';}
-  else{rt.textContent='🐱 A macskák nyertek! 😼';rt.style.color='#f87171';}
-}
-
-document.getElementById('restart-btn').addEventListener('click',()=>{
-  gold1=50;gold2=50;dogBaseHP=100;catBaseHP=100;
-  units=[];particles=[];gameOver=false;goldTimer=0;
-  aiTimer=0; aiNextThink=calcNextThink(); aiThinkingDots=0; aiDotTimer=0;
-  updateGoldUI();
-  document.getElementById('overlay').classList.remove('visible');
-});
-
-// Touch double-fire megelőzése
+// ── Touch double-fire prevention ──────────────────────────────────────────────
 document.querySelectorAll('.unit-btn').forEach(btn => {
   btn.addEventListener('touchstart', e => e.preventDefault(), {passive:false});
 });
-
-// AI gomb touch
-document.getElementById('ai-toggle').addEventListener('touchstart', e => {
-  e.preventDefault(); toggleAI();
-}, {passive:false});
+['ai-toggle'].forEach(id => {
+  const el = document.getElementById(id);
+  if(el) el.addEventListener('touchstart', e=>{e.preventDefault();toggleAI();},{passive:false});
+});
 ['diff-easy','diff-medium','diff-hard'].forEach(id => {
-  document.getElementById(id).addEventListener('touchstart', e => {
-    e.preventDefault();
-    setDiff(id.replace('diff-',''));
-  }, {passive:false});
+  document.getElementById(id).addEventListener('touchstart', e=>{
+    e.preventDefault(); setDiff(id.replace('diff-',''));
+  },{passive:false});
 });
 
-function gameLoop() {
-  update(); drawScene();
-  for (const u of units) drawUnit(u);
-  drawParticles(); drawHUD();
-  requestAnimationFrame(gameLoop);
-}
+// ── Indítás ───────────────────────────────────────────────────────────────────
 updateGoldUI();
 aiNextThink = calcNextThink();
 gameLoop();
+showMenu(); // főmenüvel indul
 </script>
 </body>
 </html>
