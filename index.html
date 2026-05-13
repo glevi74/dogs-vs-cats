@@ -856,6 +856,7 @@ function update() {
       if (u.atkTimer>=u.atkSpd) {
         u.atkTimer=0; enemy.hp-=u.atk; enemy.shakeTimer=8;
         addHitParticles(enemy.x,enemy.y, u.team==='dog'?'#60a5fa99':'#f8717199');
+        sfxFight(u.team);
         if (enemy.hp<=0) {
           addDeathParticles(enemy.x,enemy.y); enemy.deathTimer=0;
           const reward = 10+Math.floor(UNIT_DEFS[enemy.type].cost*.4);
@@ -869,6 +870,7 @@ function update() {
         u.atkTimer=0;
         if (u.team==='dog'){catBaseHP-=u.atk;addHitParticles(CAT_BASE_X,H/2-20,'#f8717199');}
         else               {dogBaseHP-=u.atk;addHitParticles(DOG_BASE_X,H/2-20,'#60a5fa99');}
+        sfxBaseHit(u.team);
       }
     } else {
       u.state='walk'; u.atkTimer=0; u.x+=u.spd;
@@ -944,6 +946,112 @@ document.getElementById('restart-btn').addEventListener('click', () => {
     gameStarted = true;
   }
 });
+
+// ════════════════════════════════════════════════════════════════
+//  HANGEFFEKTEK (Web Audio API)
+// ════════════════════════════════════════════════════════════════
+let sfxCtx = null;
+let sfxFightLast = 0;   // throttle: max ~12/mp
+let sfxBaseLast  = 0;   // throttle: max 1/200ms
+
+function getSfxCtx() {
+  if (!sfxCtx) {
+    try { sfxCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+  }
+  if (sfxCtx && sfxCtx.state === 'suspended') sfxCtx.resume();
+  return sfxCtx;
+}
+
+// Mobilon az AudioContext-et user-gesture után kell inicializálni
+document.addEventListener('pointerdown', () => getSfxCtx(), { once: true });
+
+// Harc hangeffekt — dog: rövid mély morgás-ütés; cat: magas siszegés-karmolás
+function sfxFight(attackerTeam) {
+  const now = performance.now();
+  if (now - sfxFightLast < 85) return;   // max ~12 ütéshang/mp — ne fullassza el
+  sfxFightLast = now;
+  const ac = getSfxCtx(); if (!ac) return;
+  try {
+    const t = ac.currentTime;
+    const isDog = attackerTeam === 'dog';
+
+    // ── Zaj réteg (ütközés "crush" textúra) ──
+    const bufLen = Math.floor(ac.sampleRate * 0.09);
+    const buf    = ac.createBuffer(1, bufLen, ac.sampleRate);
+    const data   = buf.getChannelData(0);
+    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+    const nSrc = ac.createBufferSource();
+    nSrc.buffer = buf;
+    const nFilt = ac.createBiquadFilter();
+    nFilt.type = 'bandpass';
+    nFilt.frequency.value = isDog ? 350 : 1400;
+    nFilt.Q.value = 1.8;
+    const nGain = ac.createGain();
+    nGain.gain.setValueAtTime(isDog ? 0.45 : 0.35, t);
+    nGain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    nSrc.connect(nFilt); nFilt.connect(nGain); nGain.connect(ac.destination);
+    nSrc.start(t); nSrc.stop(t + 0.09);
+
+    // ── Hangszín réteg (frekvencia-söprés) ──
+    const osc  = ac.createOscillator();
+    const oGain = ac.createGain();
+    osc.type = isDog ? 'sawtooth' : 'square';
+    osc.frequency.setValueAtTime( isDog ? 200 : 700, t);
+    osc.frequency.exponentialRampToValueAtTime(isDog ? 55 : 220, t + 0.08);
+    oGain.gain.setValueAtTime(isDog ? 0.22 : 0.18, t);
+    oGain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
+    osc.connect(oGain); oGain.connect(ac.destination);
+    osc.start(t); osc.stop(t + 0.08);
+  } catch(e) {}
+}
+
+// Bázis találat hangeffekt — mély dob-ütés + éles klikk
+function sfxBaseHit(attackerTeam) {
+  const now = performance.now();
+  if (now - sfxBaseLast < 220) return;
+  sfxBaseLast = now;
+  const ac = getSfxCtx(); if (!ac) return;
+  try {
+    const t = ac.currentTime;
+    const isDog = attackerTeam === 'dog';   // kutya üti a macska bázist, vagy fordítva
+
+    // ── Mély "boom" dob ──
+    const drum  = ac.createOscillator();
+    const dGain = ac.createGain();
+    drum.type = 'sine';
+    drum.frequency.setValueAtTime(130, t);
+    drum.frequency.exponentialRampToValueAtTime(38, t + 0.28);
+    dGain.gain.setValueAtTime(0.70, t);
+    dGain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
+    drum.connect(dGain); dGain.connect(ac.destination);
+    drum.start(t); drum.stop(t + 0.28);
+
+    // ── Rövid éles klikk (impact crack) ──
+    const clickBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * 0.04), ac.sampleRate);
+    const cd = clickBuf.getChannelData(0);
+    for (let i = 0; i < cd.length; i++) cd[i] = (Math.random()*2-1) * (1 - i/cd.length);
+    const cSrc  = ac.createBufferSource();
+    cSrc.buffer = clickBuf;
+    const cFilt = ac.createBiquadFilter();
+    cFilt.type = 'highpass';
+    cFilt.frequency.value = isDog ? 800 : 1600;
+    const cGain = ac.createGain();
+    cGain.gain.setValueAtTime(0.55, t);
+    cGain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
+    cSrc.connect(cFilt); cFilt.connect(cGain); cGain.connect(ac.destination);
+    cSrc.start(t); cSrc.stop(t + 0.04);
+
+    // ── Rövid riasztó-szerű felső hang (figyelemfelhívó) ──
+    const bell  = ac.createOscillator();
+    const bGain = ac.createGain();
+    bell.type = 'triangle';
+    bell.frequency.value = isDog ? 440 : 660;
+    bGain.gain.setValueAtTime(0.25, t);
+    bGain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    bell.connect(bGain); bGain.connect(ac.destination);
+    bell.start(t); bell.stop(t + 0.18);
+  } catch(e) {}
+}
 
 // ════════════════════════════════════════════════════════════════
 //  PARTICLES
