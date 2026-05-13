@@ -789,6 +789,7 @@ function pickLane(team) {
 
 function spawnUnit(type, player) {
   if (!gameStarted || gameOver) return;
+  sfxUnlock(); // biztosítja, hogy az AudioContext running legyen mire harc indul
   // Online módban csak a saját játékost irányíthatjuk
   if (mpMode && player !== mpMyPlayer) return;
   const cost = UNIT_DEFS[type].cost;
@@ -951,105 +952,81 @@ document.getElementById('restart-btn').addEventListener('click', () => {
 //  HANGEFFEKTEK (Web Audio API)
 // ════════════════════════════════════════════════════════════════
 let sfxCtx = null;
-let sfxFightLast = 0;   // throttle: max ~12/mp
-let sfxBaseLast  = 0;   // throttle: max 1/200ms
+let sfxFightLast = 0;
+let sfxBaseLast  = 0;
 
-function getSfxCtx() {
+// AudioContext feloldása — minden user-gesture eseménynél meghívódik
+function sfxUnlock() {
   if (!sfxCtx) {
-    try { sfxCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
+    try { sfxCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+    catch(e) { return; }
   }
-  if (sfxCtx && sfxCtx.state === 'suspended') sfxCtx.resume();
-  return sfxCtx;
+  if (sfxCtx.state === 'suspended') sfxCtx.resume().catch(() => {});
+}
+// Feloldás touchstart + mousedown + click eseményekre (nem once — mindig frissítjük)
+document.addEventListener('touchstart', sfxUnlock, { passive: true });
+document.addEventListener('mousedown',  sfxUnlock, { passive: true });
+document.addEventListener('click',      sfxUnlock, { passive: true });
+
+// ── Belső segédfüggvények ─────────────────────────────────────
+function _sfxTone(freq, type, gain, dur, freqEnd) {
+  if (!sfxCtx) return;
+  const t   = sfxCtx.currentTime;
+  const osc = sfxCtx.createOscillator();
+  const g   = sfxCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t);
+  if (freqEnd) osc.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  osc.connect(g); g.connect(sfxCtx.destination);
+  osc.start(t); osc.stop(t + dur + 0.01);
 }
 
-// Mobilon az AudioContext-et user-gesture után kell inicializálni
-document.addEventListener('pointerdown', () => getSfxCtx(), { once: true });
+function _sfxNoise(filterFreq, gain, dur) {
+  if (!sfxCtx) return;
+  const srate  = sfxCtx.sampleRate;
+  const bufLen = Math.floor(srate * Math.min(dur, 0.15));
+  const buf    = sfxCtx.createBuffer(1, bufLen, srate);
+  const data   = buf.getChannelData(0);
+  for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
+  const t    = sfxCtx.currentTime;
+  const src  = sfxCtx.createBufferSource();
+  src.buffer = buf;
+  const filt = sfxCtx.createBiquadFilter();
+  filt.type = 'bandpass'; filt.frequency.value = filterFreq; filt.Q.value = 2;
+  const g = sfxCtx.createGain();
+  g.gain.setValueAtTime(gain, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(filt); filt.connect(g); g.connect(sfxCtx.destination);
+  src.start(t); src.stop(t + dur);
+}
 
-// Harc hangeffekt — dog: rövid mély morgás-ütés; cat: magas siszegés-karmolás
-function sfxFight(attackerTeam) {
+// Harc hangeffekt — kutya: mély morgás-ütés; macska: éles karmolás
+function sfxFight(team) {
   const now = performance.now();
-  if (now - sfxFightLast < 85) return;   // max ~12 ütéshang/mp — ne fullassza el
+  if (now - sfxFightLast < 90) return;
   sfxFightLast = now;
-  const ac = getSfxCtx(); if (!ac) return;
   try {
-    const t = ac.currentTime;
-    const isDog = attackerTeam === 'dog';
-
-    // ── Zaj réteg (ütközés "crush" textúra) ──
-    const bufLen = Math.floor(ac.sampleRate * 0.09);
-    const buf    = ac.createBuffer(1, bufLen, ac.sampleRate);
-    const data   = buf.getChannelData(0);
-    for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1;
-    const nSrc = ac.createBufferSource();
-    nSrc.buffer = buf;
-    const nFilt = ac.createBiquadFilter();
-    nFilt.type = 'bandpass';
-    nFilt.frequency.value = isDog ? 350 : 1400;
-    nFilt.Q.value = 1.8;
-    const nGain = ac.createGain();
-    nGain.gain.setValueAtTime(isDog ? 0.45 : 0.35, t);
-    nGain.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
-    nSrc.connect(nFilt); nFilt.connect(nGain); nGain.connect(ac.destination);
-    nSrc.start(t); nSrc.stop(t + 0.09);
-
-    // ── Hangszín réteg (frekvencia-söprés) ──
-    const osc  = ac.createOscillator();
-    const oGain = ac.createGain();
-    osc.type = isDog ? 'sawtooth' : 'square';
-    osc.frequency.setValueAtTime( isDog ? 200 : 700, t);
-    osc.frequency.exponentialRampToValueAtTime(isDog ? 55 : 220, t + 0.08);
-    oGain.gain.setValueAtTime(isDog ? 0.22 : 0.18, t);
-    oGain.gain.exponentialRampToValueAtTime(0.001, t + 0.08);
-    osc.connect(oGain); oGain.connect(ac.destination);
-    osc.start(t); osc.stop(t + 0.08);
+    if (team === 'dog') {
+      _sfxNoise(350, 0.8, 0.09);
+      _sfxTone(170, 'sawtooth', 0.4, 0.09, 55);
+    } else {
+      _sfxNoise(1400, 0.7, 0.07);
+      _sfxTone(660, 'square', 0.3, 0.07, 230);
+    }
   } catch(e) {}
 }
 
-// Bázis találat hangeffekt — mély dob-ütés + éles klikk
-function sfxBaseHit(attackerTeam) {
+// Bázis találat hangeffekt — mély dob + éles klikk + figyelemcsengő
+function sfxBaseHit(team) {
   const now = performance.now();
   if (now - sfxBaseLast < 220) return;
   sfxBaseLast = now;
-  const ac = getSfxCtx(); if (!ac) return;
   try {
-    const t = ac.currentTime;
-    const isDog = attackerTeam === 'dog';   // kutya üti a macska bázist, vagy fordítva
-
-    // ── Mély "boom" dob ──
-    const drum  = ac.createOscillator();
-    const dGain = ac.createGain();
-    drum.type = 'sine';
-    drum.frequency.setValueAtTime(130, t);
-    drum.frequency.exponentialRampToValueAtTime(38, t + 0.28);
-    dGain.gain.setValueAtTime(0.70, t);
-    dGain.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
-    drum.connect(dGain); dGain.connect(ac.destination);
-    drum.start(t); drum.stop(t + 0.28);
-
-    // ── Rövid éles klikk (impact crack) ──
-    const clickBuf = ac.createBuffer(1, Math.floor(ac.sampleRate * 0.04), ac.sampleRate);
-    const cd = clickBuf.getChannelData(0);
-    for (let i = 0; i < cd.length; i++) cd[i] = (Math.random()*2-1) * (1 - i/cd.length);
-    const cSrc  = ac.createBufferSource();
-    cSrc.buffer = clickBuf;
-    const cFilt = ac.createBiquadFilter();
-    cFilt.type = 'highpass';
-    cFilt.frequency.value = isDog ? 800 : 1600;
-    const cGain = ac.createGain();
-    cGain.gain.setValueAtTime(0.55, t);
-    cGain.gain.exponentialRampToValueAtTime(0.001, t + 0.04);
-    cSrc.connect(cFilt); cFilt.connect(cGain); cGain.connect(ac.destination);
-    cSrc.start(t); cSrc.stop(t + 0.04);
-
-    // ── Rövid riasztó-szerű felső hang (figyelemfelhívó) ──
-    const bell  = ac.createOscillator();
-    const bGain = ac.createGain();
-    bell.type = 'triangle';
-    bell.frequency.value = isDog ? 440 : 660;
-    bGain.gain.setValueAtTime(0.25, t);
-    bGain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
-    bell.connect(bGain); bGain.connect(ac.destination);
-    bell.start(t); bell.stop(t + 0.18);
+    _sfxTone(120, 'sine',     0.9, 0.30, 40);
+    _sfxNoise(team === 'dog' ? 700 : 1500, 0.8, 0.05);
+    _sfxTone(team === 'dog' ? 440 : 660, 'triangle', 0.4, 0.20);
   } catch(e) {}
 }
 
